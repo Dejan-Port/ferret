@@ -209,7 +209,6 @@ First commit: June 2026
 
 Server component: SSPL-1.0 — free for self-hosted use; commercial use requires a license.  
 Agent component: AGPLv3 — free for everyone.  
-Kernel module: GPL-2.0  
 See [LICENSE](LICENSE).
 
 ---
@@ -217,5 +216,3 @@ See [LICENSE](LICENSE).
 ## Contributing
 
 Issues and PRs welcome. For security vulnerabilities, email directly (see profile).
-
-If you're a Rust or kernel developer interested in v0.2–v0.4 — especially wanted.
