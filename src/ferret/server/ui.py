@@ -230,6 +230,21 @@ code.token-cell:hover{{border-color:#3b5bdb}}
 
 <div class="toast" id="toast"></div>
 
+<!-- Login modal -->
+<div class="overlay" id="loginOverlay" style="display:none">
+  <div class="modal" style="max-width:360px;text-align:center">
+    <h2 style="margin-bottom:8px">🐾 Ferret</h2>
+    <p style="color:#4b5270;margin-bottom:20px;font-size:14px">Unesi admin token</p>
+    <input type="password" id="loginInput" placeholder="Admin token"
+           style="width:100%;padding:10px 14px;background:#1a1d2e;border:1px solid #2d3354;
+                  border-radius:8px;color:#e2e8f0;font-size:14px;margin-bottom:12px;outline:none">
+    <button class="btn" style="width:100%" onclick="doLogin()">Prijavi se</button>
+    <div id="loginErr" style="color:#f87171;font-size:13px;margin-top:10px;display:none">
+      Nevalidan token
+    </div>
+  </div>
+</div>
+
 <script>
 var PRESETS = {presets_js};
 var newRules  = [];
@@ -243,7 +258,7 @@ function buildPresets(containerId, rulesArr, toggleFn) {{
   var el = document.getElementById(containerId);
   el.innerHTML = PRESETS.map(function(p) {{
     var active = rulesArr.indexOf(p.value) >= 0 ? 'active' : '';
-    return '<button class="preset-btn '+active+'" onclick="'+toggleFn+'(this,\''+p.value+'\')" type="button">'+p.label+'</button>';
+    return '<button class="preset-btn '+active+'" onclick="'+toggleFn+'(this,\\''+p.value+'\\')" type="button">'+p.label+'</button>';
   }}).join('');
 }}
 
@@ -254,7 +269,7 @@ function renderTags(containerId, rulesArr, removeFn) {{
     return;
   }}
   el.innerHTML = rulesArr.map(function(r) {{
-    return '<span class="rule-tag"><span>'+r+'</span><button onclick="'+removeFn+'(\''+r+'\')" type="button">×</button></span>';
+    return '<span class="rule-tag"><span>'+r+'</span><button onclick="'+removeFn+'(\\''+r+'\\')" type="button">×</button></span>';
   }}).join('');
 }}
 
@@ -426,10 +441,31 @@ function showToast(msg) {{
   clearTimeout(t._t); t._t = setTimeout(() => t.style.display = 'none', 3500);
 }}
 
-function promptToken() {{
-  var t = prompt('Admin token:');
-  if(t) {{ localStorage.setItem('adminToken', t); location.reload(); }}
+function showLogin() {{
+  document.getElementById('loginOverlay').style.display = 'flex';
+  setTimeout(() => document.getElementById('loginInput').focus(), 100);
 }}
+
+function hideLogin() {{
+  document.getElementById('loginOverlay').style.display = 'none';
+}}
+
+async function doLogin() {{
+  var tok = document.getElementById('loginInput').value.trim();
+  if (!tok) return;
+  var r = await fetch(_apiUrl('/auth'), {{headers:{{'Authorization':'Bearer '+tok}}}});
+  if (r.ok) {{
+    localStorage.setItem('adminToken', tok);
+    hideLogin();
+    location.reload();
+  }} else {{
+    document.getElementById('loginErr').style.display = 'block';
+  }}
+}}
+
+document.getElementById('loginInput').addEventListener('keydown', function(e) {{
+  if (e.key === 'Enter') doLogin();
+}});
 
 function _apiUrl(path) {{
   return location.pathname.replace('/ui','') + path;
@@ -443,6 +479,9 @@ function _api(method, path, body) {{
       'Authorization': 'Bearer ' + (localStorage.getItem('adminToken') || '')
     }},
     body: body ? JSON.stringify(body) : undefined
+  }}).then(r => {{
+    if (r.status === 401) {{ showLogin(); throw new Error('Unauthorized'); }}
+    return r;
   }});
 }}
 
@@ -451,7 +490,7 @@ document.querySelectorAll('.token-cell').forEach(el => {{
   el.addEventListener('click', () => copyText(el.title));
 }});
 
-if(!localStorage.getItem('adminToken')) promptToken();
+if (!localStorage.getItem('adminToken')) showLogin();
 </script>
 </body>
 </html>"""

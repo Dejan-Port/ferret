@@ -387,9 +387,18 @@ class AgentRouter:
 
         # ── UI ────────────────────────────────────────────────────────────────
 
-        @router.get(f"{prefix}/ui", response_class=HTMLResponse,
-                    dependencies=[Depends(_check_admin)])
+        @router.get(f"{prefix}/auth")
+        def check_auth(creds: HTTPAuthorizationCredentials = Depends(security)):
+            """Jednostavan endpoint za validaciju admin tokena — 200 OK ili 401."""
+            if not self._admin_token:
+                return {"ok": True}
+            if not creds or creds.credentials != self._admin_token:
+                raise HTTPException(401, "Nevalidan token")
+            return {"ok": True}
+
+        @router.get(f"{prefix}/ui", response_class=HTMLResponse)
         def admin_ui():
+            # HTML uvek serviran — auth se proverava u JS via /agents/auth
             agents = self._registry.list_all()
             return render_ui(agents)
 
@@ -543,3 +552,58 @@ tr:hover td{{background:#1a1d27}}
 
 def _esc(s: str) -> str:
     return str(s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _render_login(redirect: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ferret — Login</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{background:#0a0c14;color:#e2e8f0;font-family:system-ui,sans-serif;
+       display:flex;align-items:center;justify-content:center;min-height:100vh}}
+  .box{{background:#0f1117;border:1px solid #1e2235;border-radius:12px;
+        padding:40px;width:340px;text-align:center}}
+  h1{{font-size:28px;margin-bottom:6px}}
+  p{{color:#4b5270;margin-bottom:28px;font-size:14px}}
+  input{{width:100%;padding:10px 14px;background:#1a1d2e;border:1px solid #2d3354;
+         border-radius:8px;color:#e2e8f0;font-size:14px;margin-bottom:16px;outline:none}}
+  input:focus{{border-color:#3b5bdb}}
+  button{{width:100%;padding:11px;background:#3b5bdb;border:none;border-radius:8px;
+          color:#fff;font-size:15px;cursor:pointer;font-weight:600}}
+  button:hover{{background:#2f4ac7}}
+  .err{{color:#f87171;font-size:13px;margin-top:12px;display:none}}
+</style>
+</head>
+<body>
+<div class="box">
+  <h1>🐾 Ferret</h1>
+  <p>Enter admin token to continue</p>
+  <input type="password" id="tok" placeholder="Admin token" autofocus
+         onkeydown="if(event.key==='Enter')login()">
+  <button onclick="login()">Login</button>
+  <div class="err" id="err">Invalid token</div>
+</div>
+<script>
+async function login() {{
+  const tok = document.getElementById('tok').value.trim();
+  if (!tok) return;
+  const r = await fetch('{redirect}/auth', {{headers:{{'Authorization':'Bearer '+tok}}}});
+  if (r.ok) {{
+    localStorage.setItem('adminToken', tok);
+    location.href = '{redirect}/ui';
+  }} else {{
+    document.getElementById('err').style.display = 'block';
+  }}
+}}
+// Ako već ima token u localStorage, proveri pa preusmeri
+const saved = localStorage.getItem('adminToken');
+if (saved) {{
+  fetch('{redirect}/auth', {{headers:{{'Authorization':'Bearer '+saved}}}})
+    .then(r => {{ if(r.ok) location.href = '{redirect}/ui'; }});
+}}
+</script>
+</body>
+</html>"""
