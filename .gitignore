@@ -1,0 +1,30 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Secrets — never commit
+agent.conf
+*.key
+*.pem
+*.crt
+ca.key
+ca.crt
+machine.key
+admin_token
+
+# Runtime
+*.db
+*.sqlite
+sent.txt
+ferret.log
+
+# IDE
+.vscode/
+.idea/
+*.swp

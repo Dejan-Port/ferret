@@ -1,0 +1,35 @@
+[agent]
+portal_url   = wss://portal.rs/ws/agent
+token        = vas-token-ovde
+reconnect_sec = 10
+
+# ── AMI (Asterisk) ────────────────────────────────────────────────────────────
+[ami]
+enabled  = false
+host     = localhost
+port     = 5038
+user     = admin
+password = tajno
+modem    = dongle0
+
+# ── SMS ───────────────────────────────────────────────────────────────────────
+[sms]
+enabled      = false
+incoming_log = /var/log/asterisk/sms.txt
+sent_log     = /opt/agent/sent.txt
+
+# ── Web SMS UI (lokalni browser interfejs za SMS) ─────────────────────────────
+[web]
+enabled = false
+port    = 7000
+
+# ── AI / OCR (Ollama) ─────────────────────────────────────────────────────────
+[ai]
+enabled    = false
+ollama_url = http://localhost:11434
+model      = llava:7b-v1.6-mistral-q4_0
+
+# ── Poznati SMS pošiljaoci (opciono) ──────────────────────────────────────────
+# Dodati sender_id = Naziv za alfanumeričke ID-ove koji nisu u defaultnoj listi
+[senders]
+# MYFIRM = Moja Firma d.o.o.

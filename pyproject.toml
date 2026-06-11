@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "ferret-agent"
+version = "0.1.0"
+description = "Ferret — self-hosted outbound tunnel agent. No port forwarding, no third-party cloud."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+keywords = ["tunnel", "vpn", "remote-access", "websocket", "self-hosted", "firewall", "nat-traversal"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Networking",
+    "Topic :: Security",
+    "Topic :: Internet",
+]
+dependencies = ["websockets>=12.0"]
+
+[project.optional-dependencies]
+server = ["fastapi>=0.110", "uvicorn>=0.29", "cryptography>=42"]
+crypto = ["cryptography>=42"]
+all    = ["fastapi>=0.110", "uvicorn>=0.29", "cryptography>=42"]
+
+[project.scripts]
+ferret        = "ferret.cli.agent:main"
+ferret-server = "ferret.cli.server:main"
+
+[project.urls]
+Homepage   = "https://github.com/ferret-agent/ferret"
+Issues     = "https://github.com/ferret-agent/ferret/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
