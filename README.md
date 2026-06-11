@@ -190,10 +190,26 @@ Requires Python 3.11+. Linux only for TUN features; proxy and custom handlers wo
 
 ---
 
+## Origin
+
+Ferret was born out of a real production need while building
+[ServisPort](https://github.com/Dejan-Port/port-servisni-portal) —
+a field service management platform for repair shops, started in May 2026.
+
+We needed to connect field technicians' devices behind strict firewalls
+without opening ports or relying on third-party services.
+
+Nothing on the market solved this simply. So we built it.
+
+First commit: June 2026
+
+---
+
 ## License
 
-AGPLv3 — free for open source projects and self-hosted use.  
-Commercial license available for proprietary/closed-source use.  
+Server component: SSPL-1.0 — free for self-hosted use; commercial use requires a license.  
+Agent component: AGPLv3 — free for everyone.  
+Kernel module: GPL-2.0  
 See [LICENSE](LICENSE).
 
 ---
@@ -202,4 +218,4 @@ See [LICENSE](LICENSE).
 
 Issues and PRs welcome. For security vulnerabilities, email directly (see profile).
 
-If you're a kernel developer interested in v0.4 — especially wanted.
+If you're a Rust or kernel developer interested in v0.2–v0.4 — especially wanted.
