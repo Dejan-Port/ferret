@@ -246,13 +246,17 @@ def _decode_token_srv(token: str) -> str:
 def _url_matches(token_srv: str, connect_url: str) -> bool:
     """
     Poredi server URL iz tokena sa URL-om na koji se agent konektuje.
-    Ignoriše query string (token, hw parametri se dodaju pri konektu).
+    Token sadrži base URL (npr. wss://server.com), agent se konektuje
+    na puni WS path (npr. wss://server.com/ws/agent) — path agenta
+    mora počinjati sa pathom iz tokena.
     """
     from urllib.parse import urlparse
     a = urlparse(token_srv)
     b = urlparse(connect_url)
-    # scheme: ws == wss nije ok, ali http/https i ws/wss parovi jesu
     scheme_ok = a.scheme == b.scheme or {a.scheme, b.scheme} in (
         {"ws", "wss"}, {"http", "https"}
     )
-    return scheme_ok and a.netloc == b.netloc and a.path == b.path
+    if not scheme_ok or a.netloc != b.netloc:
+        return False
+    token_path = a.path.rstrip("/") or ""
+    return b.path.startswith(token_path)
