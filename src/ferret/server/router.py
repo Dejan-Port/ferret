@@ -8,6 +8,7 @@ Uključuje:
   - Audit log UI (/agents/audit)
 """
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -67,6 +68,8 @@ class AgentRouter:
         self._connections: dict[str, WebSocket] = {}
         self._session_keys: dict[str, bytes]    = {}
         self._connect_time: dict[str, float]    = {}
+        self._forward_handlers: dict[str, dict] = {}
+        self._tun_sessions: dict[str, asyncio.Queue] = {}
 
         self.router = APIRouter()
         self._register_routes(path_prefix, ws_path)
@@ -153,7 +156,8 @@ class AgentRouter:
             client_ip = (websocket.headers.get("x-forwarded-for", "")
                          or getattr(websocket.client, "host", ""))
 
-            if self._token_gen:
+            # Pokušaj HMAC validaciju ako je token_gen dostupan i token ima potpis
+            if self._token_gen and "." in token:
                 payload = self._token_gen.validate(token, hw, self._server_hw_id)
                 if not payload:
                     self._audit.log("agent_connect", token=token,
@@ -235,8 +239,19 @@ class AgentRouter:
                         pass
 
                     else:
-                        if self._on_message:
-                            asyncio.create_task(self._on_message(token, data))
+                        # TUN paketi — rutuj ka admin tun klijentu
+                        if t in ("tun_ready", "tun_packet"):
+                            tun_q = self._tun_sessions.get(token)
+                            if tun_q:
+                                asyncio.create_task(tun_q.put(data))
+                        else:
+                            # Prosleđuj forward handler-ima za tu sesiju
+                            sid = data.get("session_id", "")
+                            fwd = self._forward_handlers.get(token, {}).get(sid)
+                            if fwd:
+                                asyncio.create_task(fwd(data))
+                            elif self._on_message:
+                                asyncio.create_task(self._on_message(token, data))
 
             except WebSocketDisconnect:
                 pass
@@ -251,6 +266,252 @@ class AgentRouter:
                                 detail={"duration_sec": duration},
                                 ip=client_ip)
                 log.info("Agent diskonektovan: %s (trajanje: %ds)", agent["name"], duration)
+
+        # ── Local forward WebSocket (server otvara TCP direktno) ─────────────
+
+        @router.websocket(f"{prefix}/local-forward")
+        async def ws_local_forward(
+            websocket: WebSocket,
+            admin_token: str = "",
+            host: str = "",
+            port: int = 0,
+        ):
+            if self._admin_token and admin_token != self._admin_token:
+                await websocket.close(code=4001)
+                return
+            if not host or not port:
+                await websocket.close(code=4003)
+                return
+            try:
+                reader, writer = await asyncio.wait_for(
+                    asyncio.open_connection(host, port), timeout=10
+                )
+            except Exception as e:
+                log.warning("local-forward ne može da se konektuje na %s:%d: %s", host, port, e)
+                await websocket.close(code=4004)
+                return
+
+            await websocket.accept()
+            log.info("local-forward: %s:%d", host, port)
+
+            async def pump_to_client():
+                try:
+                    while True:
+                        chunk = await asyncio.wait_for(reader.read(32768), timeout=300)
+                        if not chunk:
+                            break
+                        await websocket.send_bytes(chunk)
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
+
+            async def pump_to_server():
+                try:
+                    async for msg in websocket.iter_bytes():
+                        writer.write(msg)
+                        await writer.drain()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        writer.close()
+                    except Exception:
+                        pass
+
+            await asyncio.gather(pump_to_client(), pump_to_server())
+
+        # ── Admin forward WebSocket ───────────────────────────────────────────
+
+        @router.websocket(f"{prefix}/forward")
+        async def ws_forward(
+            websocket: WebSocket,
+            admin_token: str = "",
+            agent: str = "",
+            host: str = "",
+            port: int = 0,
+        ):
+            """
+            Admin TCP forward: premoštava TCP konekciju kroz agenta.
+            Protokol: raw binarni WebSocket = bajti TCP sesije.
+            """
+            if self._admin_token and admin_token != self._admin_token:
+                await websocket.close(code=4001)
+                return
+            agent_ws = self._connections.get(agent)
+            if not agent_ws:
+                await websocket.close(code=4002)
+                return
+            await websocket.accept()
+
+            import uuid
+            sid = uuid.uuid4().hex
+
+            loop = asyncio.get_event_loop()
+            ready   = asyncio.Event()
+            ok_flag = [False]
+            queue: asyncio.Queue = asyncio.Queue()
+
+            async def inject(data: dict):
+                t = data.get("type", "")
+                if t == "tcp_opened" and data.get("session_id") == sid:
+                    ok_flag[0] = data.get("ok", False)
+                    ready.set()
+                elif t == "tcp_data" and data.get("session_id") == sid:
+                    await queue.put(base64.b64decode(data.get("data", "")))
+                elif t == "tcp_close" and data.get("session_id") == sid:
+                    await queue.put(None)
+
+            self._forward_handlers.setdefault(agent, {})[sid] = inject
+
+            await self.send(agent, {"type": "tcp_open", "session_id": sid,
+                                     "host": host, "port": port})
+
+            try:
+                await asyncio.wait_for(ready.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                self._forward_handlers.get(agent, {}).pop(sid, None)
+                await websocket.close(code=4003)
+                return
+
+            if not ok_flag[0]:
+                self._forward_handlers.get(agent, {}).pop(sid, None)
+                await websocket.close(code=4004)
+                return
+
+            async def pump_to_client():
+                try:
+                    while True:
+                        chunk = await queue.get()
+                        if chunk is None:
+                            break
+                        await websocket.send_bytes(chunk)
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
+
+            async def pump_to_agent():
+                try:
+                    while True:
+                        msg = await websocket.receive()
+                        if msg.get("type") == "websocket.disconnect":
+                            break
+                        raw = msg.get("bytes") or (msg.get("text", "").encode())
+                        if raw:
+                            await self.send(agent, {
+                                "type":       "tcp_data",
+                                "session_id": sid,
+                                "data":       base64.b64encode(raw).decode(),
+                            })
+                except Exception:
+                    pass
+                finally:
+                    await self.send(agent, {"type": "tcp_close", "session_id": sid})
+                    self._forward_handlers.get(agent, {}).pop(sid, None)
+
+            await asyncio.gather(pump_to_client(), pump_to_agent())
+
+        # ── Admin TUN WebSocket ───────────────────────────────────────────────
+
+        @router.websocket(f"{prefix}/tun")
+        async def ws_tun(
+            websocket: WebSocket,
+            admin_token: str = "",
+            agent: str = "",
+        ):
+            if self._admin_token and admin_token != self._admin_token:
+                await websocket.close(code=4001)
+                return
+            if not self._connections.get(agent):
+                await websocket.close(code=4002)
+                return
+
+            tun_queue: asyncio.Queue = asyncio.Queue()
+            ready_event = asyncio.Event()
+            ready_data  = [None]
+
+            # Registruj queue — server ruter prosleđuje tun_ready/tun_packet ovde
+            self._tun_sessions[agent] = tun_queue
+
+            await websocket.accept()
+
+            # Čitaj tun_request od klijenta
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=10)
+                req = json.loads(raw)
+            except Exception:
+                self._tun_sessions.pop(agent, None)
+                await websocket.close(code=4003)
+                return
+
+            # Pošalji tun_config agentu
+            cfg = {
+                "type":         "tun_config",
+                "ip":           req.get("agent_ip", "10.99.0.2"),
+                "gateway":      req.get("client_ip", "10.99.0.1"),
+                "mtu":          req.get("mtu", 1400),
+                "routes":       [],
+                "lan_access":   True,
+            }
+            if req.get("remap_subnet"):
+                cfg["remap_subnet"] = req["remap_subnet"]
+            await self.send(agent, cfg)
+
+            # Čekaj tun_ready od agenta
+            async def wait_ready():
+                while True:
+                    data = await tun_queue.get()
+                    if data.get("type") == "tun_ready":
+                        ready_data[0] = data
+                        ready_event.set()
+                        return
+                    await tun_queue.put(data)  # vrati paket u queue
+
+            try:
+                await asyncio.wait_for(wait_ready(), timeout=15)
+            except asyncio.TimeoutError:
+                self._tun_sessions.pop(agent, None)
+                await websocket.close(code=4003)
+                return
+
+            await websocket.send_text(json.dumps(ready_data[0]))
+            log.info("TUN sesija uspostavljena za agenta %s", agent[:8])
+
+            async def pump_to_client():
+                try:
+                    while True:
+                        pkt = await tun_queue.get()
+                        await websocket.send_text(json.dumps(pkt))
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
+
+            async def pump_to_agent():
+                try:
+                    async for msg in websocket.iter_text():
+                        try:
+                            await self.send(agent, json.loads(msg))
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                finally:
+                    await self.send(agent, {"type": "tun_down"})
+                    self._tun_sessions.pop(agent, None)
+                    log.info("TUN sesija zatvorena za agenta %s", agent[:8])
+
+            await asyncio.gather(pump_to_client(), pump_to_agent())
 
         # ── Admin check ───────────────────────────────────────────────────────
 

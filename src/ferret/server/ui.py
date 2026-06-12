@@ -53,8 +53,13 @@ def render_ui(agents: list[dict]) -> str:
             f' title="Preuzmi Windows installer">🪟</button> '
         )
 
+        edit_btn = '<button class="btn-sm btn-edit" onclick="openEdit(\'' + token + '\')">Pravila</button> '
+        rev_btn  = '<button class="btn-sm btn-rev" onclick="revoke(\'' + token + '\')">Revokuj</button>'
+        action_btns = (inst_btns + cert_btn + edit_btn + rev_btn) if not revoked else '—'
+        tr_class = 'revoked' if revoked else ''
+
         rows += f"""
-        <tr class="{'revoked' if revoked else ''}" data-token="{token}" data-rules="{rules_data}">
+        <tr class="{tr_class}" data-token="{token}" data-rules="{rules_data}">
           <td>{dot} {status}</td>
           <td><strong>{_esc(a.get('name',''))}</strong></td>
           <td style="color:#8b93a7">{_esc(a.get('note',''))}</td>
@@ -66,12 +71,7 @@ def render_ui(agents: list[dict]) -> str:
           <td style="color:#8b93a7">{_esc(caps) if caps != '—' else '—'}</td>
           <td style="color:#4b5270">{_esc(a.get('last_seen','') or '—')}</td>
           <td style="color:#4b5270">{_esc(a.get('created_at',''))}</td>
-          <td>
-            {(inst_btns + cert_btn +
-              '<button class="btn-sm btn-edit" onclick="openEdit(\''+token+'\')">Pravila</button> '
-              '<button class="btn-sm btn-rev" onclick="revoke(\''+token+'\')">Revokuj</button>')
-              if not revoked else '—'}
-          </td>
+          <td>{action_btns}</td>
         </tr>"""
 
     presets_js = json.dumps([{"label": l, "value": v} for l, v in _RULE_PRESETS])

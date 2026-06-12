@@ -50,12 +50,14 @@ class Agent:
         reconnect_sec: int = 10,
         hw_id: str = "",
         encrypt: bool = True,
+        ssl_context=None,
     ):
         self._url          = url
         self._token        = token
         self._reconnect_sec = reconnect_sec
         self._hw_id        = hw_id
         self._encrypt      = encrypt and crypto.available()
+        self._ssl_context  = ssl_context
         self._session_key: bytes | None = None
 
         self._handlers: dict[str, Callable]  = {}
@@ -143,10 +145,14 @@ class Agent:
 
         while True:
             try:
+                _ssl = self._ssl_context
+                if _ssl is None and connect_url.startswith("wss://"):
+                    _ssl = True
                 async with websockets.connect(
                     connect_url,
                     ping_interval=30,
                     ping_timeout=10,
+                    ssl=_ssl,
                 ) as ws:
                     self._ws = ws
                     self._session_key = None

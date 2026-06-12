@@ -50,6 +50,8 @@ class TunHandler:
         self._routes_added: list[str] = []
         self._orig_gateway: str = ""
         self._lan_masq_active = False
+        self._remap_subnet: str = ""   # "10.8.0.0/24" → remap LAN na ovaj subnet
+        self._dns_task: asyncio.Task | None = None
 
     def register(self, agent):
         agent.register_handler("tun_config", self._handle_config, capability="tun")
@@ -64,9 +66,10 @@ class TunHandler:
         gateway    = data.get("gateway", "")
         dns        = data.get("dns", "")
         mtu        = int(data.get("mtu", MTU_DEFAULT))
-        routes     = data.get("routes", [])
-        portal_ip  = data.get("portal_ip", "")
-        lan_access = data.get("lan_access", False)
+        routes         = data.get("routes", [])
+        portal_ip      = data.get("portal_ip", "")
+        lan_access     = data.get("lan_access", False)
+        remap_subnet   = data.get("remap_subnet", "")
 
         try:
             self._mtu = mtu
@@ -93,7 +96,8 @@ class TunHandler:
                 self._routes_added.append(route)
 
             # ── LAN forwarding ────────────────────────────────────────────────
-            local_subnets = []
+            local_subnets  = []
+            report_subnets = []
             if lan_access and self._lan_iface is not None:
                 lan_iface = (
                     _detect_lan_iface() if self._lan_iface == "auto"
@@ -106,13 +110,34 @@ class TunHandler:
                         self._lan_masq_active = True
                         log.info("LAN forwarding: %s → %s, subneti: %s",
                                  self._iface, lan_iface, local_subnets)
+                        if remap_subnet:
+                            # NETMAP: remap LAN subnet na drugi opseg
+                            for lan_sub in local_subnets:
+                                _enable_netmap(self._iface, lan_sub, remap_subnet)
+                            self._remap_subnet = remap_subnet
+                            report_subnets = [remap_subnet] + local_subnets
+                            log.info("Subnet remap: %s → %s", local_subnets, remap_subnet)
+                        else:
+                            report_subnets = local_subnets
                     else:
                         log.warning("LAN: nije pronađen subnet na %s", lan_iface)
                 else:
                     log.warning("LAN: nije detektovan LAN interfejs")
 
-            log.info("TUN %s up — IP: %s", self._iface, ip)
-            await send({"type": "tun_ready", "subnets": local_subnets})
+            # DNS rewrite mapa: 192.168.1.x → 10.8.0.x
+            dns_rewrite = None
+            if remap_subnet and local_subnets:
+                try:
+                    old_p = bytes(int(x) for x in local_subnets[0].split(".")[:3])
+                    new_p = bytes(int(x) for x in remap_subnet.split("/")[0].rsplit(".", 1)[0].split("."))
+                    dns_rewrite = (old_p, new_p)
+                except Exception:
+                    pass
+
+            self._dns_task = asyncio.create_task(_run_dns_proxy(ip, rewrite=dns_rewrite))
+
+            log.info("TUN %s up — IP: %s | DNS proxy: %s:5353", self._iface, ip, ip)
+            await send({"type": "tun_ready", "subnets": report_subnets, "dns": f"{ip}:5353"})
 
         except Exception as e:
             log.error("tun_config greška: %s", e)
@@ -169,6 +194,9 @@ class TunHandler:
                 except Exception:
                     pass
             self._routes_added.clear()
+            if self._dns_task:
+                self._dns_task.cancel()
+                self._dns_task = None
             if self._lan_masq_active:
                 try:
                     _disable_forwarding(self._iface)
@@ -224,17 +252,38 @@ def _get_local_subnets(iface: str) -> list[str]:
     return subnets
 
 
+def _enable_netmap(tun_iface: str, lan_subnet: str, remap_subnet: str):
+    """NETMAP: paketi koji dolaze na remap_subnet → prevodi u lan_subnet i obratno."""
+    comment = f"ferret-remap-{tun_iface}"
+    # Dolazni paketi kroz TUN: dst remap → lan
+    _run("iptables", "-t", "nat", "-A", "PREROUTING",
+         "-i", tun_iface, "-d", remap_subnet,
+         "-j", "NETMAP", "--to", lan_subnet,
+         "-m", "comment", "--comment", comment)
+    # Odlazni paketi prema TUN: src lan → remap
+    _run("iptables", "-t", "nat", "-A", "POSTROUTING",
+         "-o", tun_iface, "-s", lan_subnet,
+         "-j", "NETMAP", "--to", remap_subnet,
+         "-m", "comment", "--comment", comment)
+
+
 def _enable_forwarding(tun_iface: str, lan_iface: str):
     """Uključuje IP forwarding i NAT masquerade za LAN."""
     with open("/proc/sys/net/ipv4/ip_forward", "w") as f:
         f.write("1")
+    _run("iptables", "-t", "nat", "-I", "POSTROUTING", "2",
+         "-o", tun_iface, "-j", "ACCEPT",
+         "-m", "comment", "--comment", f"ferret-{tun_iface}")
     _run("iptables", "-t", "nat", "-A", "POSTROUTING",
          "-o", lan_iface, "-j", "MASQUERADE",
          "-m", "comment", "--comment", f"ferret-{tun_iface}")
-    _run("iptables", "-A", "FORWARD",
+    _run("iptables", "-I", "INPUT", "1",
+         "-i", tun_iface, "-j", "ACCEPT",
+         "-m", "comment", "--comment", f"ferret-{tun_iface}")
+    _run("iptables", "-I", "FORWARD", "1",
          "-i", tun_iface, "-o", lan_iface, "-j", "ACCEPT",
          "-m", "comment", "--comment", f"ferret-{tun_iface}")
-    _run("iptables", "-A", "FORWARD",
+    _run("iptables", "-I", "FORWARD", "1",
          "-i", lan_iface, "-o", tun_iface,
          "-m", "state", "--state", "RELATED,ESTABLISHED", "-j", "ACCEPT",
          "-m", "comment", "--comment", f"ferret-{tun_iface}")
@@ -243,22 +292,52 @@ def _enable_forwarding(tun_iface: str, lan_iface: str):
 def _disable_forwarding(tun_iface: str):
     """Uklanja iptables pravila koja je agent dodao."""
     try:
-        out = subprocess.check_output(
-            ["iptables-save"], text=True
-        )
-        comment = f"ferret-{tun_iface}"
+        out = subprocess.check_output(["iptables-save"], text=True)
+        comments = [f"ferret-{tun_iface}", f"ferret-remap-{tun_iface}"]
+        table = "filter"
         for line in out.splitlines():
-            if comment in line and line.startswith("-A"):
-                table = "filter"
-                if "-t nat" in line or "POSTROUTING" in line:
-                    table = "nat"
+            if line.startswith("*"):
+                table = line[1:].strip()
+                continue
+            if not line.startswith("-A"):
+                continue
+            if any(c in line for c in comments):
                 del_line = line.replace("-A", "-D", 1)
                 try:
-                    _run("iptables", "-t", table, *del_line.split()[1:])
+                    _run("iptables", "-t", table, *del_line.split())
                 except Exception:
                     pass
     except Exception as e:
         log.warning("iptables cleanup greška: %s", e)
+
+
+def _get_local_dns() -> str:
+    """Vraća DNS server za klijente — ako je loopback, koristi pravi LAN IP."""
+    try:
+        with open("/etc/resolv.conf") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("nameserver"):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ip = parts[1]
+                        if ip.startswith("127."):
+                            # Loopback DNS — vrati pravi LAN IP mašine
+                            lan = _detect_lan_iface()
+                            if lan:
+                                out = subprocess.check_output(
+                                    ["ip", "-o", "-4", "addr", "show", "dev", lan],
+                                    text=True
+                                )
+                                for l in out.splitlines():
+                                    p = l.split()
+                                    if len(p) >= 4:
+                                        return p[3].split("/")[0]
+                            return ip
+                        return ip
+    except Exception:
+        pass
+    return ""
 
 
 def _run(*args):
@@ -277,6 +356,130 @@ def _get_default_gateway() -> str:
     except Exception:
         pass
     return ""
+
+
+async def _run_dns_proxy(bind_ip: str, upstream: str = "", port: int = 5353,
+                         rewrite: tuple[bytes, bytes] | None = None):
+    """UDP DNS proxy: prima upite na bind_ip:port, prosleđuje na upstream:53.
+    rewrite=(old_prefix, new_prefix) — rewrite IP adresa u DNS odgovorima."""
+    import socket as _socket
+    if not upstream:
+        upstream = _get_local_dns() or "8.8.8.8"
+    loop = asyncio.get_running_loop()
+
+    srv = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+    srv.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
+    try:
+        srv.bind((bind_ip, port))
+    except OSError as e:
+        log.warning("DNS proxy bind %s:%s neuspešan: %s", bind_ip, port, e)
+        srv.close()
+        return
+    srv.setblocking(False)
+
+    fwd = _socket.socket(_socket.AF_INET, _socket.SOCK_DGRAM)
+    fwd.setblocking(False)
+
+    pending: dict[bytes, tuple] = {}
+
+    def _dns_local_resolve(name: str) -> bytes | None:
+        """Pokušaj lokalno razrešavanje (mDNS/NetBIOS/hosts) za jednočlana imena."""
+        import socket as _socket
+        try:
+            infos = _socket.getaddrinfo(name, None, _socket.AF_INET)
+            if infos:
+                return _socket.inet_aton(infos[0][4][0])
+        except Exception:
+            pass
+        # Fallback: NetBIOS broadcast via nmblookup
+        try:
+            out = subprocess.check_output(["nmblookup", name], text=True, timeout=3)
+            for line in out.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and not parts[0].startswith("name") \
+                        and not parts[0].startswith("added") \
+                        and not parts[0].startswith("Got") \
+                        and not parts[0].startswith("Socket"):
+                    try:
+                        return _socket.inet_aton(parts[0])
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return None
+
+    def _build_dns_response(query: bytes, ip_bytes: bytes) -> bytes:
+        """Gradi sintetički DNS A odgovor za datu IP adresu."""
+        tid = query[:2]
+        flags = b'\x81\x80'  # QR=1 AA=0 RD=1 RA=1, NOERROR
+        qdcount = query[4:6]
+        ancount = b'\x00\x01'
+        nscount = b'\x00\x00'
+        arcount = b'\x00\x00'
+        question = query[12:]
+        # A record: name pointer 0xc00c, type A, class IN, TTL 30, rdlen 4, rdata
+        answer = b'\xc0\x0c\x00\x01\x00\x01\x00\x00\x00\x1e\x00\x04' + ip_bytes
+        return tid + flags + qdcount + ancount + nscount + arcount + question + answer
+
+    def _parse_qname(data: bytes) -> str:
+        """Izvuci ime upita iz DNS paketa."""
+        try:
+            pos = 12
+            labels = []
+            while pos < len(data):
+                ln = data[pos]
+                if ln == 0:
+                    break
+                labels.append(data[pos+1:pos+1+ln].decode(errors="replace"))
+                pos += 1 + ln
+            return ".".join(labels)
+        except Exception:
+            return ""
+
+    def on_client():
+        try:
+            data, addr = srv.recvfrom(4096)
+            name = _parse_qname(data)
+            # Jednočlano ime (bez tačke) — pokušaj lokalni NSS pre DNS-a
+            if name and "." not in name:
+                ip_b = _dns_local_resolve(name)
+                if ip_b:
+                    if rewrite and ip_b[:3] == rewrite[0]:
+                        ip_b = rewrite[1] + ip_b[3:]
+                    srv.sendto(_build_dns_response(data, ip_b), addr)
+                    log.debug("DNS local: %s → %s", name, ".".join(str(b) for b in ip_b))
+                    return
+            pending[data[:2]] = addr
+            fwd.sendto(data, (upstream, 53))
+        except Exception:
+            pass
+
+    def on_upstream():
+        try:
+            data, _ = fwd.recvfrom(4096)
+            tid = data[:2]
+            if rewrite:
+                data = data.replace(rewrite[0], rewrite[1])
+            addr = pending.pop(tid, None)
+            if addr:
+                srv.sendto(data, addr)
+        except Exception:
+            pass
+
+    loop.add_reader(srv.fileno(), on_client)
+    loop.add_reader(fwd.fileno(), on_upstream)
+    log.info("DNS proxy aktivan: %s:53 → %s:53", bind_ip, upstream)
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        pass
+    finally:
+        loop.remove_reader(srv.fileno())
+        loop.remove_reader(fwd.fileno())
+        srv.close()
+        fwd.close()
+        log.info("DNS proxy ugašen")
 
 
 def _set_dns(dns_ip: str):

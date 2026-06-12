@@ -16,6 +16,8 @@ You have a Raspberry Pi, a camera, a printer, a PLC — behind a strict firewall
 
 Ferret is different: **you run the server**. Your traffic never leaves your infrastructure.
 
+And your server doesn't need a static IP. Run it at home with a [No-IP](https://www.noip.com/) or any dynamic DNS service — the agent connects to `yourname.ddns.net` and it just works.
+
 ---
 
 ## How it works
@@ -54,7 +56,7 @@ The agent creates a TUN interface and connects outbound. The server assigns a VP
 
 ## Quick start
 
-### Server
+### Server (static IP or dynamic DNS)
 
 ```bash
 pip install "ferret-agent[server]"
@@ -62,10 +64,12 @@ pip install "ferret-agent[server]"
 ferret-server \
   --admin-token your-secret-token \
   --secret     your-signing-secret \
-  --public-url https://your-server.example.com
+  --public-url https://yourname.ddns.net
 ```
 
-Open `https://your-server.example.com/agents/` — admin UI with token management.
+No static IP required. Works with No-IP, DuckDNS, or any dynamic DNS — only port 443 needs to be open.
+
+Open `https://yourname.ddns.net/agents/` — admin UI with token management.
 
 ### Agent (manual)
 
@@ -138,6 +142,8 @@ No traffic passes through third-party infrastructure. Ever.
 | Per-agent ACL | Enterprise | No | No | **Yes** |
 | Audit log | Enterprise | No | Paid | **Included** |
 | Hardware binding | No | No | No | **Yes** |
+| Static IP required | Yes | Yes | — | **No** |
+| Dynamic DNS support | No | No | — | **Yes** |
 | Open source (server) | No | No | No | **Yes** |
 | Price | $18/user/mo | $4/user/mo | $8+/mo | **$0** |
 
@@ -183,9 +189,10 @@ Requires Python 3.11+. Linux only for TUN features; proxy and custom handlers wo
 ## Roadmap
 
 - **v0.1** — Python, WebSocket, all features above ✅
-- **v0.2** — QUIC transport (replaces WebSocket/TCP → eliminates TCP-over-TCP, ~800 Mbps)
-- **v0.3** — Rust rewrite of data plane (agent + server tunnel core)
-- **v0.4** — Linux kernel module (`ferret.ko`) — WireGuard-class throughput
+- **v0.2** — TAP mode (Layer 2 bridge) — remote machines appear in Windows File Explorer Network neighborhood; Samba shares browsable without manual IP
+- **v0.3** — QUIC transport (replaces WebSocket/TCP → eliminates TCP-over-TCP, ~800 Mbps)
+- **v0.4** — Rust rewrite of data plane (agent + server tunnel core)
+- **v0.5** — Linux kernel module (`ferret.ko`) — WireGuard-class throughput
 - **v1.0** — Upstream Linux kernel submission
 
 ---
