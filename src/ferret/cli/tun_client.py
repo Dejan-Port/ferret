@@ -21,6 +21,7 @@ import fcntl
 import json
 import logging
 import os
+import random
 import struct
 import subprocess
 import sys
@@ -132,7 +133,7 @@ def _teardown(iface: str, routes: list[str]):
         except Exception:
             pass
     try:
-        _run("ip", "link", "set", iface, "down")
+        _run("ip", "link", "del", iface)
     except Exception:
         pass
 
@@ -151,7 +152,24 @@ async def _run_tun(server: str, admin_token: str, agent: str,
     tun    = None
     routes = []
 
-    async with websockets.connect(ws_url, ssl=ssl_ctx) as ws:
+    _headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Origin": server.rstrip("/"),
+    }
+
+    async with websockets.connect(ws_url, ssl=ssl_ctx,
+                                   additional_headers=_headers,
+                                   ping_interval=None,
+                                   open_timeout=15) as ws:
+
+        async def _keepalive():
+            try:
+                while True:
+                    await asyncio.sleep(random.uniform(3, 8))
+                    await ws.ping()
+            except Exception:
+                pass
         # Pošalji tun_request — server prosleđuje agentu
         await ws.send(json.dumps({
             "type":        "tun_request",
@@ -219,7 +237,7 @@ async def _run_tun(server: str, admin_token: str, agent: str,
                     log.warning("WS poruka greška: %s", e)
 
         try:
-            await asyncio.gather(read_tun(), read_ws())
+            await asyncio.gather(read_tun(), read_ws(), _keepalive())
         finally:
             _teardown(TUN_IFACE, routes)
             if tun:

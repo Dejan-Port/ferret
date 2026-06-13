@@ -1,5 +1,7 @@
 # 🐾 Ferret
 
+> ⚠️ **v0.1 Alpha** — works in production for us, but APIs and config format may change before v1.0. See [Roadmap](#roadmap).
+
 **Self-hosted outbound tunnel. No port forwarding. No third-party cloud. No accounts.**
 
 Ferret lets you reach any device behind a firewall — corporate NAT, hospital network, hotel WiFi — without opening a single inbound port. The agent initiates an outbound connection on port 443. That's it.
@@ -43,6 +45,7 @@ The agent creates a TUN interface and connects outbound. The server assigns a VP
 
 - **Outbound only** — agent initiates, works through any firewall
 - **Full LAN access** — reach every device on the agent's network, not just the agent
+- **Native subnet replication** — via NETMAP, the remote LAN appears on a local subnet; devices are reachable as if you were physically on the same network (e.g. remote `192.168.1.x` → local `10.8.0.x`, same structure, no manual IP mapping)
 - **Per-agent ACL** — restrict which ports/IPs are accessible, hot-reloadable without disconnect
 - **mTLS** — per-agent client certificates, CA pinned in agent
 - **Hardware binding** — token tied to machine via HMAC of DMI/BIOS data + local secret
@@ -67,9 +70,9 @@ ferret-server \
   --public-url https://yourname.ddns.net
 ```
 
-No static IP required. Works with No-IP, DuckDNS, or any dynamic DNS — only port 443 needs to be open.
+Only port 443 needs to be open. A static IP is not required — dynamic DNS (No-IP, DuckDNS) works fine, as long as the server has a real public IP. **CGNAT does not work** — if your ISP shares a public IP across multiple customers, run the server on a VPS instead.
 
-Open `https://yourname.ddns.net/agents/` — admin UI with token management.
+Open `https://yourname.ddns.net/agents/ui` — admin UI with token management and agent status.
 
 ### Agent (manual)
 
@@ -91,6 +94,41 @@ In the server UI, click **🐧** next to any agent to download a self-contained 
 
 ```bash
 curl https://your-server.example.com/agents/<token>/installer?os=linux | sudo bash
+```
+
+### VPN client (ferret tun)
+
+Connect your laptop to any agent's LAN from anywhere — the remote network appears locally via NETMAP:
+
+```bash
+pip install ferret-agent
+
+sudo ferret tun \
+  --server      https://your-server.example.com \
+  --admin-token your-secret-token \
+  --agent       <agent-token>
+```
+
+After connecting, the remote LAN is directly reachable — `ping 10.8.0.100`, SSH, browser, everything works as if you were physically on site. Requires root / `CAP_NET_ADMIN`.
+
+To run as a systemd service:
+
+```bash
+sudo tee /etc/systemd/system/ferret-tun.service << EOF
+[Unit]
+Description=Ferret TUN VPN
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ferret tun --server https://your-server.example.com --admin-token your-secret-token --agent <agent-token>
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable --now ferret-tun
 ```
 
 ---
@@ -188,7 +226,7 @@ Requires Python 3.11+. Linux only for TUN features; proxy and custom handlers wo
 
 ## Roadmap
 
-- **v0.1** — Python, WebSocket, all features above ✅
+- **v0.1** — Python, WebSocket, all features above ✅ — CLI VPN client (`ferret tun`); GUI tray app planned
 - **v0.2** — TAP mode (Layer 2 bridge) — remote machines appear in Windows File Explorer Network neighborhood; Samba shares browsable without manual IP
 - **v0.3** — QUIC transport (replaces WebSocket/TCP → eliminates TCP-over-TCP, ~800 Mbps)
 - **v0.4** — Rust rewrite of data plane (agent + server tunnel core)

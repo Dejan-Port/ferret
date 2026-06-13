@@ -146,30 +146,35 @@ class TunHandler:
     # ── Čitanje paketa iz kernela → portal ───────────────────────────────────
 
     async def _read_loop(self, send: Callable[..., Awaitable]):
-        while self._tun is None:
-            await asyncio.sleep(0.2)
+        while True:
+            while self._tun is None:
+                await asyncio.sleep(0.2)
 
-        loop   = asyncio.get_running_loop()
-        tun_fd = self._tun.fileno()
-        queue  = asyncio.Queue(maxsize=512)
+            loop   = asyncio.get_running_loop()
+            tun    = self._tun
+            tun_fd = tun.fileno()
+            queue  = asyncio.Queue(maxsize=512)
 
-        def _on_readable():
+            def _on_readable():
+                try:
+                    pkt = os.read(tun_fd, self._mtu + 4)
+                    queue.put_nowait(pkt)
+                except Exception:
+                    pass
+
+            loop.add_reader(tun_fd, _on_readable)
             try:
-                pkt = os.read(tun_fd, self._mtu + 4)
-                queue.put_nowait(pkt)
-            except Exception:
-                pass
-
-        loop.add_reader(tun_fd, _on_readable)
-        try:
-            while True:
-                pkt = await queue.get()
-                await send({
-                    "type": "tun_packet",
-                    "data": base64.b64encode(pkt).decode(),
-                })
-        finally:
-            loop.remove_reader(tun_fd)
+                while self._tun is tun:
+                    try:
+                        pkt = await asyncio.wait_for(queue.get(), timeout=0.5)
+                        await send({
+                            "type": "tun_packet",
+                            "data": base64.b64encode(pkt).decode(),
+                        })
+                    except asyncio.TimeoutError:
+                        pass
+            finally:
+                loop.remove_reader(tun_fd)
 
     # ── Primanje paketa od portala → kernel ──────────────────────────────────
 
