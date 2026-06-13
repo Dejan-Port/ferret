@@ -248,6 +248,8 @@ Nothing on the market solved this simply. So we built it.
 
 First commit: June 2026
 
+**Author:** Dejan Kocić — [dkocic@servisport.org](mailto:dkocic@servisport.org)
+
 ---
 
 ## License
