@@ -50,6 +50,7 @@ class Agent:
         reconnect_sec: int = 10,
         hw_id: str = "",
         encrypt: bool = True,
+        cipher: str = "chacha20",
         ssl_context=None,
     ):
         self._url          = url
@@ -57,6 +58,7 @@ class Agent:
         self._reconnect_sec = reconnect_sec
         self._hw_id        = hw_id
         self._encrypt      = encrypt and crypto.available()
+        self._cipher       = cipher if cipher in ("chacha20", "aes256gcm") else "chacha20"
         self._ssl_context  = ssl_context
         self._session_key: bytes | None = None
 
@@ -100,7 +102,7 @@ class Agent:
             async with self._send_lock:
                 raw = json.dumps(data)
                 if self._session_key and self._encrypt:
-                    raw = crypto.encrypt(self._session_key, raw.encode())
+                    raw = crypto.encrypt(self._session_key, raw.encode(), self._cipher)
                 await self._ws.send(raw)
         except Exception as e:
             log.warning("send greška: %s", e)
@@ -150,8 +152,7 @@ class Agent:
                     _ssl = True
                 async with websockets.connect(
                     connect_url,
-                    ping_interval=30,
-                    ping_timeout=10,
+                    ping_interval=None,
                     ssl=_ssl,
                 ) as ws:
                     self._ws = ws
@@ -169,6 +170,12 @@ class Agent:
                     if not resp.get("ok"):
                         log.error("Registracija odbijena: %s", resp.get("error", ""))
                         return
+                    if not resp.get("approved", True):
+                        log.info("Agent čeka odobrenje admina — HWID vezan, konekcija otvorena")
+                        # Drži konekciju živom ali ne obrađuje tunel zahteve
+                        async for _ in ws:
+                            pass
+                        return
 
                     # 2. Crypto handshake (ako obe strane podržavaju)
                     if self._encrypt and resp.get("encrypt"):
@@ -176,14 +183,16 @@ class Agent:
                         await ws.send(json.dumps({
                             "type":   "crypto_hello",
                             "nonce":  client_nonce.hex(),
+                            "cipher": self._cipher,
                         }))
                         hs = json.loads(await ws.recv())
                         if hs.get("type") == "crypto_ok":
-                            server_nonce = bytes.fromhex(hs["nonce"])
+                            server_nonce  = bytes.fromhex(hs["nonce"])
+                            self._cipher  = hs.get("cipher", "chacha20")
                             self._session_key = crypto.derive_session_key(
-                                self._token, client_nonce, server_nonce
+                                self._token, client_nonce, server_nonce, self._cipher
                             )
-                            log.info("Enkriptovana sesija uspostavljena")
+                            log.info("Enkriptovana sesija | cipher: %s", self._cipher)
                         else:
                             log.warning("Server odbio enkripciju — nastavljam bez")
 
@@ -225,10 +234,12 @@ class Agent:
                         for task in tasks:
                             task.cancel()
                         self._ws = None
+                        crypto.zero_key(self._session_key)
                         self._session_key = None
 
             except Exception as e:
                 self._ws = None
+                crypto.zero_key(self._session_key)
                 self._session_key = None
                 log.warning("Konekcija prekinuta: %s — pokušavam za %ds",
                             e, self._reconnect_sec)

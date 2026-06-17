@@ -1,0 +1,13 @@
+[Unit]
+Description=Ferret Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ferret
+ExecStart=/usr/local/bin/ferret
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

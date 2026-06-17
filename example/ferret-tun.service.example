@@ -1,0 +1,17 @@
+[Unit]
+Description=Ferret TUN VPN klijent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ferret-tun \
+  --server      https://your-server.example.com \
+  --admin-token YOUR_ADMIN_TOKEN \
+  --agent       AGENT_TOKEN \
+  --route       192.168.1.0/24
+Restart=always
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

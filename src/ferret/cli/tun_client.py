@@ -159,7 +159,7 @@ async def _run_tun(server: str, admin_token: str, agent: str,
     }
 
     async with websockets.connect(ws_url, ssl=ssl_ctx,
-                                   additional_headers=_headers,
+                                   extra_headers=_headers,
                                    ping_interval=None,
                                    open_timeout=15) as ws:
 

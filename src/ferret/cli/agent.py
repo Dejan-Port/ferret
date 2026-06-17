@@ -44,6 +44,9 @@ def main():
                    help="Instaliraj kao systemd servis i izađi")
     p.add_argument("--no-encrypt", action="store_true",
                    help="Isključi aplikativnu enkripciju")
+    p.add_argument("--cipher", default="",
+                   choices=["", "chacha20", "aes256gcm"],
+                   help="Cipher za enkripciju (default: chacha20)")
 
     args = p.parse_args()
 
@@ -57,6 +60,7 @@ def main():
     cert_file    = cfg.get("cert_file", "")
     log_level    = args.log_level       or cfg.get("log_level", "INFO")
     encrypt      = not args.no_encrypt and cfg.get("encrypt", "true").lower() != "false"
+    cipher       = args.cipher          or cfg.get("cipher", "chacha20")
 
     if not server or not token:
         print("Greška: --server i --token su obavezni (ili config fajl)", file=sys.stderr)
@@ -67,7 +71,7 @@ def main():
         _install_systemd(server, token, handlers_str, ca_fp, log_level)
         return
 
-    _run(server, token, handlers_str, ca_fp, cert_file, log_level, encrypt)
+    _run(server, token, handlers_str, ca_fp, cert_file, log_level, encrypt, cipher)
 
 
 def _load_config(explicit_path: str) -> dict:
@@ -80,7 +84,7 @@ def _load_config(explicit_path: str) -> dict:
     return {}
 
 
-def _run(server, token, handlers_str, ca_fp, cert_file, log_level, encrypt):
+def _run(server, token, handlers_str, ca_fp, cert_file, log_level, encrypt, cipher="chacha20"):
     import logging
 
     logging.basicConfig(
@@ -100,6 +104,7 @@ def _run(server, token, handlers_str, ca_fp, cert_file, log_level, encrypt):
         token=token,
         hw_id=hw_id.get(),
         encrypt=encrypt,
+        cipher=cipher,
         ssl_context=ssl_ctx,
     )
 

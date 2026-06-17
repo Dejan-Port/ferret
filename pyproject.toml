@@ -20,7 +20,7 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Internet",
 ]
-dependencies = ["websockets>=12.0"]
+dependencies = ["websockets>=12.0,<14"]
 
 [project.optional-dependencies]
 server = ["fastapi>=0.110", "uvicorn>=0.29", "cryptography>=42"]
@@ -35,6 +35,7 @@ ferret-forward = "ferret.cli.forward:main"
 ferret-socks   = "ferret.cli.socks:main"
 ferret-tun     = "ferret.cli.tun_client:main"
 ferret-gui     = "ferret.gui.tray:main"
+ferret-db      = "ferret.cli.db_crypt:main"
 
 [project.urls]
 Homepage   = "https://github.com/ferret-agent/ferret"

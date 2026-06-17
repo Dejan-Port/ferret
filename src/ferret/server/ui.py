@@ -152,6 +152,10 @@ code.token-cell:hover{{border-color:#3b5bdb}}
 <!-- Kreiranje novog agenta -->
 <div class="card">
   <h2>Novi agent</h2>
+  <p style="color:#4b5270;font-size:13px;margin-bottom:12px">
+    Generiše <strong>invite token</strong> koji važi <strong>5 minuta</strong>.
+    Agent se konektuje, šalje HWID, i čeka odobrenje admina.
+  </p>
   <div class="form-row">
     <div>
       <label>Naziv</label>
@@ -172,8 +176,16 @@ code.token-cell:hover{{border-color:#3b5bdb}}
     </div>
   </div>
   <div style="margin-top:16px">
-    <button class="btn" onclick="createAgent()">Generiši token</button>
+    <button class="btn" onclick="createInvite()">Generiši invite token (5 min)</button>
   </div>
+</div>
+
+<!-- Pending agenti -->
+<div class="card" id="pendingCard" style="display:none">
+  <h2 style="color:#fbbf24">⏳ Čekaju odobrenje</h2>
+  <table id="pendingTable">
+    <tr><th>Naziv</th><th>HWID (prvih 16)</th><th>Kreiran</th><th></th></tr>
+  </table>
 </div>
 
 <!-- Tabela agenata -->
@@ -298,6 +310,28 @@ function addCustom() {{
   renderTags('ruleTags', newRules, 'removeNew');
 }}
 
+async function createInvite() {{
+  var name = document.getElementById('name').value.trim();
+  if(!name) {{ alert('Naziv je obavezan'); return; }}
+  var note = document.getElementById('note').value.trim();
+  try {{
+    var r = await _api('POST', '/invite', {{name, note, rules: newRules}});
+    if(r.status === 401) {{ promptToken(); return; }}
+    var d = await r.json();
+    document.getElementById('tokenValue').textContent = d.token;
+    document.getElementById('certNotice').style.display = 'none';
+    document.getElementById('downloadBtn').style.display = 'none';
+    document.getElementById('tokenModal').style.display = 'flex';
+    document.getElementById('name').value = '';
+    document.getElementById('note').value = '';
+    newRules = [];
+    buildPresets('presets', newRules, 'toggleNew');
+    renderTags('ruleTags', newRules, 'removeNew');
+    // Počni da pratiš pending odmah
+    setTimeout(loadPending, 3000);
+  }} catch(err) {{ alert('Greška: ' + err); }}
+}}
+
 async function createAgent() {{
   var name = document.getElementById('name').value.trim();
   if(!name) {{ alert('Naziv je obavezan'); return; }}
@@ -309,7 +343,6 @@ async function createAgent() {{
 
     document.getElementById('tokenValue').textContent = d.token;
 
-    // Sertifikat — samo ako je server vratio
     _lastBundle = null;
     var certNotice = document.getElementById('certNotice');
     var downloadBtn = document.getElementById('downloadBtn');
@@ -330,6 +363,58 @@ async function createAgent() {{
     renderTags('ruleTags', newRules, 'removeNew');
   }} catch(err) {{ alert('Greška: ' + err); }}
 }}
+
+function _escHtml(s) {{
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}}
+
+async function loadPending() {{
+  try {{
+    var r = await _api('GET', '/pending');
+    if(r.status !== 200) return;
+    var list = await r.json();
+    var card = document.getElementById('pendingCard');
+    var tbody = document.getElementById('pendingTable');
+    if(!list.length) {{ card.style.display = 'none'; return; }}
+    card.style.display = '';
+    var rows = '<tr><th>Naziv</th><th>HWID (prvih 16)</th><th>Kreiran</th><th></th></tr>';
+    list.forEach(function(a) {{
+      var hwid = a.hwid ? _escHtml(a.hwid.substring(0,16)) + '…' : '<em style="color:#4b5270">čeka konekciju</em>';
+      var canApprove = !!a.hwid;
+      rows += '<tr>' +
+        '<td>' + _escHtml(a.name) + '</td>' +
+        '<td><code style="font-size:12px">' + hwid + '</code></td>' +
+        '<td style="color:#4b5270;font-size:12px">' + _escHtml(a.created_at||'') + '</td>' +
+        '<td>' + (canApprove
+          ? '<button class="btn" style="padding:4px 14px;font-size:12px" data-token="' + _escHtml(a.token) + '" onclick="approveAgent(this.dataset.token)">✓ Odobri</button>'
+          : '<span style="color:#4b5270;font-size:12px">čeka…</span>') +
+        ' <button class="btn-ghost" style="padding:4px 10px;font-size:12px;color:#f87171" data-token="' + _escHtml(a.token) + '" onclick="revoke(this.dataset.token)">✕</button>' +
+        '</td>' +
+      '</tr>';
+    }});
+    tbody.innerHTML = rows;
+  }} catch(e) {{}}
+}}
+
+async function approveAgent(token) {{
+  try {{
+    var r = await _api('POST', '/' + token + '/approve', {{}});
+    if(r.status === 401) {{ promptToken(); return; }}
+    var d = await r.json();
+    if(d.ok) {{
+      alert('Agent odobren! HWID: ' + d.hwid);
+      loadPending();
+      location.reload();
+    }} else {{
+      alert('Greška pri odobrenju');
+    }}
+  }} catch(e) {{ alert('Greška: ' + e); }}
+}}
+
+// Polling pending na 10s
+setInterval(loadPending, 10000);
+loadPending();
 
 // ── Bundle download ───────────────────────────────────────────────────────────
 

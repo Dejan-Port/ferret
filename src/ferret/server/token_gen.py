@@ -169,13 +169,15 @@ class TokenGen:
                 return None
 
             # Provera klijentskog hardvera — poredimo HMAC, ne plain hw_id
-            if payload.get("hw") != self._hw_proof(hw_id, kid):
+            if not hmac.compare_digest(payload.get("hw", ""),
+                                       self._hw_proof(hw_id, kid)):
                 return None
 
             # Provera server hardvera
             token_srv_hw = payload.get("srv_hw", "")
             if token_srv_hw and server_hw_id:
-                if token_srv_hw != self._hw_proof(server_hw_id, kid):
+                if not hmac.compare_digest(token_srv_hw,
+                                           self._hw_proof(server_hw_id, kid)):
                     return None
 
             return payload

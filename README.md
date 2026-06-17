@@ -152,6 +152,82 @@ Then `mstsc /v:your-server:13389` from anywhere.
 
 ---
 
+## Encrypted server storage (ferret-db)
+
+`ferret-db` protects server data from physical theft. The LUKS container is bound to hardware fingerprint (HWID) — a key derived from DMI UUIDs, CPU model, and disk serials. Without the original hardware, the container is unreadable.
+
+### How it works
+
+```
+  Hardware (DMI + CPU + disk serials)
+        │
+        ▼
+  HWID string  ──── SHA-256 ────►  material
+  machine.key ─────────────────►  material
+        │
+        ▼
+  HKDF(SHA-256, salt, info="ferret-db-key-v1")  →  LUKS passphrase (64 bytes)
+        │
+        ▼
+  cryptsetup luksOpen /db/ferret-data.img
+        │
+        ▼
+  /db/secure/   ← ext4, mounted at boot, unmounted at shutdown
+```
+
+Key is derived in memory via `memfd_create` (never touches disk). Memory is `mlock`-ed and zeroed after use.
+
+### Setup (one-time)
+
+```bash
+# Install with crypto dependencies
+pip install "ferret-agent[all]"
+
+# Initialize 20GB container
+sudo ferret-db init --size 20
+
+# Output:
+# Container : /db/ferret-data.img  (20GB)
+# Header    : /etc/ferret/db.header  ← back this up separately!
+# Mounted   : /db/secure
+```
+
+The LUKS header is stored separately at `/etc/ferret/db.header`. Back it up — without it the container cannot be opened even with the correct hardware.
+
+### Daily operation
+
+```bash
+sudo ferret-db unlock   # open + mount (called automatically by systemd)
+sudo ferret-db lock     # unmount + close
+sudo ferret-db status   # check state
+sudo ferret-db reset    # re-key after hardware replacement (audit logged)
+```
+
+### systemd integration
+
+```ini
+[Service]
+PermissionsStartOnly=true
+ExecStartPre=/usr/local/bin/ferret-db unlock
+ExecStart=/usr/local/bin/ferret-server --admin-token ... --secret ...
+ExecStopPost=/usr/local/bin/ferret-db lock
+```
+
+See `example/ferret-server.service.example` for the full unit file.
+
+### Security properties
+
+| Property | Detail |
+|----------|--------|
+| Key source | DMI UUID + board/chassis serial + CPU model + disk serials |
+| Minimum sources | 2 hardware identifiers required; fails safe otherwise |
+| Key derivation | HKDF-SHA256, 64-byte output, random 32-byte salt per init |
+| In-memory key | `memfd_create` + `mlock` — key never written to disk or swap |
+| Audit log | Append-only (`chattr +a`) JSON log at `/var/log/ferret-db-audit.log` |
+| Header separation | LUKS header at `/etc/ferret/db.header`, body at `/db/ferret-data.img` |
+
+---
+
 ## Security model
 
 | Layer | Mechanism |

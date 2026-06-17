@@ -36,21 +36,27 @@ class TokenRegistry:
         with self._lock:
             self._con.execute("""
                 CREATE TABLE IF NOT EXISTS agents (
-                    token        TEXT PRIMARY KEY,
-                    name         TEXT NOT NULL,
-                    note         TEXT DEFAULT '',
-                    rules        TEXT DEFAULT '[]',
-                    created_at   TEXT NOT NULL,
-                    last_seen    TEXT,
-                    capabilities TEXT DEFAULT '',
-                    online       INTEGER DEFAULT 0,
-                    revoked      INTEGER DEFAULT 0
+                    token          TEXT PRIMARY KEY,
+                    name           TEXT NOT NULL,
+                    note           TEXT DEFAULT '',
+                    rules          TEXT DEFAULT '[]',
+                    created_at     TEXT NOT NULL,
+                    last_seen      TEXT,
+                    capabilities   TEXT DEFAULT '',
+                    online         INTEGER DEFAULT 0,
+                    revoked        INTEGER DEFAULT 0,
+                    hwid           TEXT DEFAULT '',
+                    approved       INTEGER DEFAULT 0,
+                    invite_expires TEXT DEFAULT ''
                 )
             """)
             # Migracije za stare baze
             for migration in (
-                "ALTER TABLE agents ADD COLUMN rules    TEXT DEFAULT '[]'",
-                "ALTER TABLE agents ADD COLUMN cert_pem TEXT DEFAULT ''",
+                "ALTER TABLE agents ADD COLUMN rules          TEXT    DEFAULT '[]'",
+                "ALTER TABLE agents ADD COLUMN cert_pem       TEXT    DEFAULT ''",
+                "ALTER TABLE agents ADD COLUMN hwid           TEXT    DEFAULT ''",
+                "ALTER TABLE agents ADD COLUMN approved       INTEGER DEFAULT 1",
+                "ALTER TABLE agents ADD COLUMN invite_expires TEXT    DEFAULT ''",
             ):
                 try:
                     self._con.execute(migration)
@@ -68,24 +74,88 @@ class TokenRegistry:
             )
             self._con.commit()
 
-    def create(self, name: str, note: str = "", rules: list[str] = None) -> str:
+    def create(self, name: str, note: str = "", rules: list[str] = None,
+               invite_minutes: int = 0) -> str:
         """
         Generiše novi token za agenta.
 
-        rules — lista ACL pravila, npr. ["tcp:22", "udp:161", "tcp:*"]
-                Prazna lista = tunel nije dozvoljen.
-                None = isti efekat kao prazna lista.
+        rules          — lista ACL pravila, npr. ["tcp:22", "udp:161", "tcp:*"]
+        invite_minutes — ako > 0, token je invite (važi N minuta za prvu konekciju,
+                         čeka odobrenje; posle odobrenja trajan je)
         """
-        token     = secrets.token_hex(24)
-        now       = datetime.now().isoformat(timespec="seconds")
+        token      = secrets.token_hex(24)  # 192 bita entropije — otporno na brute force
+        now        = datetime.now().isoformat(timespec="seconds")
         rules_json = json.dumps(rules or [])
+        expires    = ""
+        approved   = 1  # normalni tokeni su odmah odobreni (stari flow)
+        if invite_minutes > 0:
+            from datetime import timedelta
+            exp_dt  = datetime.now() + timedelta(minutes=invite_minutes)
+            expires = exp_dt.isoformat(timespec="seconds")
+            approved = 0  # invite čeka odobrenje
         with self._lock:
             self._con.execute(
-                "INSERT INTO agents (token, name, note, rules, created_at) VALUES (?,?,?,?,?)",
-                [token, name, note, rules_json, now]
+                "INSERT INTO agents (token, name, note, rules, created_at, approved, invite_expires)"
+                " VALUES (?,?,?,?,?,?,?)",
+                [token, name, note, rules_json, now, approved, expires]
             )
             self._con.commit()
         return token
+
+    def invite_valid(self, token: str) -> bool:
+        """True ako je invite token još uvek u roku (5 min)."""
+        with self._lock:
+            row = self._con.execute(
+                "SELECT invite_expires, approved FROM agents WHERE token=? AND revoked=0", [token]
+            ).fetchone()
+        if not row:
+            return False
+        if row["approved"]:
+            return True  # već odobren — uvek validan
+        expires = row["invite_expires"]
+        if not expires:
+            return True  # stari token bez expiry — prihvati
+        return datetime.now().isoformat() < expires
+
+    def bind_hwid(self, token: str, hwid: str):
+        """Vezuje HWID za token pri prvoj konekciji (pre odobrenja)."""
+        with self._lock:
+            self._con.execute(
+                "UPDATE agents SET hwid=? WHERE token=? AND hwid=''",
+                [hwid, token]
+            )
+            self._con.commit()
+
+    def approve(self, token: str):
+        """Admin odobrava agenta — token postaje trajan."""
+        with self._lock:
+            self._con.execute(
+                "UPDATE agents SET approved=1, invite_expires='' WHERE token=?", [token]
+            )
+            self._con.commit()
+
+    def check_hwid(self, token: str, hwid: str) -> bool:
+        """Proverava HWID pri rekonekciji. True ako se poklapa."""
+        with self._lock:
+            row = self._con.execute(
+                "SELECT hwid, approved FROM agents WHERE token=? AND revoked=0", [token]
+            ).fetchone()
+        if not row:
+            return False
+        if not row["approved"]:
+            return False  # nije odobren
+        stored = row["hwid"]
+        if not stored:
+            return True  # stari agent bez HWID — prihvati
+        return stored == hwid
+
+    def list_pending(self) -> list[dict]:
+        """Lista agenata koji čekaju odobrenje."""
+        with self._lock:
+            rows = self._con.execute(
+                "SELECT * FROM agents WHERE approved=0 AND revoked=0 ORDER BY created_at DESC"
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def validate(self, token: str) -> dict | None:
         """Vraća info o agentu ako je token validan i nije revokovan, inače None."""

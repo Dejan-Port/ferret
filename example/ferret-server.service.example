@@ -1,0 +1,22 @@
+[Unit]
+Description=Ferret Server
+After=network.target
+
+[Service]
+User=ferret
+WorkingDirectory=/home/ferret
+
+# ExecStartPre runs as root (needed for cryptsetup), ExecStart as User=ferret
+PermissionsStartOnly=true
+
+ExecStartPre=/usr/local/bin/ferret-db unlock
+ExecStart=/usr/local/bin/ferret-server \
+  --admin-token YOUR_ADMIN_TOKEN \
+  --secret      YOUR_SIGNING_SECRET
+ExecStopPost=/usr/local/bin/ferret-db lock
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

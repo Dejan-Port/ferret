@@ -9,6 +9,7 @@ Uključuje:
 """
 import asyncio
 import base64
+import hmac
 import json
 import logging
 import os
@@ -67,9 +68,14 @@ class AgentRouter:
 
         self._connections: dict[str, WebSocket] = {}
         self._session_keys: dict[str, bytes]    = {}
+        self._session_ciphers: dict[str, str]   = {}
         self._connect_time: dict[str, float]    = {}
         self._forward_handlers: dict[str, dict] = {}
         self._tun_sessions: dict[str, asyncio.Queue] = {}
+        # Rate limiting: {ip: [timestamp, ...]}
+        self._rl_attempts: dict[str, list[float]] = {}
+        self._rl_window   = 864000  # 10 dana u sekundama
+        self._rl_max      = 3       # max neuspešnih pokušaja pre bana
 
         self.router = APIRouter()
         self._register_routes(path_prefix, ws_path)
@@ -108,10 +114,11 @@ class AgentRouter:
         if not ws:
             return False
         try:
-            raw = json.dumps(data)
-            key = self._session_keys.get(token)
+            raw    = json.dumps(data)
+            key    = self._session_keys.get(token)
+            cipher = self._session_ciphers.get(token, "chacha20")
             if key:
-                raw = crypto.encrypt(key, raw.encode())
+                raw = crypto.encrypt(key, raw.encode(), cipher)
             await ws.send_text(raw)
             return True
         except Exception as e:
@@ -156,6 +163,15 @@ class AgentRouter:
             client_ip = (websocket.headers.get("x-forwarded-for", "")
                          or getattr(websocket.client, "host", ""))
 
+            # Rate limiting — broji samo NEUSPEŠNE pokušaje po IP u vremenskom prozoru
+            now = time.time()
+            attempts = self._rl_attempts.setdefault(client_ip, [])
+            attempts[:] = [t for t in attempts if now - t < self._rl_window]
+            if len(attempts) >= self._rl_max:
+                log.warning("Rate limit: previše pokušaja od %s", client_ip)
+                await websocket.close(code=4029)
+                return
+
             # Pokušaj HMAC validaciju ako je token_gen dostupan i token ima potpis
             if self._token_gen and "." in token:
                 payload = self._token_gen.validate(token, hw, self._server_hw_id)
@@ -163,6 +179,7 @@ class AgentRouter:
                     self._audit.log("agent_connect", token=token,
                                     detail={"ok": False, "reason": "invalid_token",
                                             "hw": hw[:16]}, ip=client_ip)
+                    attempts.append(now)
                     await websocket.close(code=4001)
                     return
                 agent = self._registry.get(token)
@@ -175,13 +192,42 @@ class AgentRouter:
                     self._registry._con.commit()
                     agent = self._registry.get(token)
             else:
-                agent = self._registry.validate(token)
-                if not agent:
+                agent = self._registry.get(token)
+                if not agent or agent.get("revoked"):
                     self._audit.log("agent_connect", token=token,
                                     detail={"ok": False, "reason": "invalid_token"},
                                     ip=client_ip)
+                    attempts.append(now)
                     await websocket.close(code=4001)
                     return
+
+                approved = agent.get("approved", 1)
+                stored_hwid = agent.get("hwid", "")
+
+                if approved:
+                    # Odobren agent — proveri HWID ako postoji
+                    if stored_hwid and hw and not hmac.compare_digest(stored_hwid, hw):
+                        self._audit.log("agent_connect", token=token,
+                                        detail={"ok": False, "reason": "hwid_mismatch",
+                                                "hw": hw[:16]}, ip=client_ip)
+                        log.warning("HWID mismatch za %s: očekivan %s, dobijen %s",
+                                    token[:8], stored_hwid[:16], hw[:16])
+                        attempts.append(now)
+                        await websocket.close(code=4003)
+                        return
+                else:
+                    # Invite token — proveri rok
+                    if not self._registry.invite_valid(token):
+                        self._audit.log("agent_connect", token=token,
+                                        detail={"ok": False, "reason": "invite_expired"},
+                                        ip=client_ip)
+                        attempts.append(now)
+                        await websocket.close(code=4002)
+                        return
+                    # Vezuj HWID pri prvoj konekciji
+                    if hw and not stored_hwid:
+                        self._registry.bind_hwid(token, hw)
+                        log.info("HWID vezan za token %s: %s", token[:8], hw[:16])
 
             await websocket.accept()
             self._connections[token]   = websocket
@@ -189,7 +235,7 @@ class AgentRouter:
 
             self._audit.log("agent_connect", token=token,
                             agent_name=agent["name"],
-                            detail={"ok": True, "hw": hw[:16]},
+                            detail={"ok": True, "hw": hw[:16], "approved": agent.get("approved", 1)},
                             ip=client_ip)
             log.info("Agent konektovan: %s (%s) od %s", agent["name"], token[:8], client_ip)
 
@@ -203,6 +249,10 @@ class AgentRouter:
 
             try:
                 async for raw in websocket.iter_text():
+                    if len(raw) > 4 * 1024 * 1024:  # 4 MB hard limit po poruci
+                        log.warning("Prevelika poruka od %s (%d B) — ignorisana",
+                                    token[:8], len(raw))
+                        continue
                     if session_key and crypto.is_encrypted(raw):
                         try:
                             raw = crypto.decrypt(session_key, raw).decode()
@@ -213,26 +263,38 @@ class AgentRouter:
                         data = json.loads(raw)
                     except Exception:
                         continue
+                    if not crypto.validate_payload(data):
+                        log.warning("Nevalidan payload od %s — odbačen", token[:8])
+                        continue
                     t = data.get("type")
 
                     if t == "register":
                         caps = data.get("capabilities", [])
                         wants_enc = data.get("encrypt", False)
+                        _fresh = self._registry.get(token)
+                        is_approved = bool(_fresh and _fresh.get("approved", 1))
                         self._registry.set_online(token, True, caps)
                         await websocket.send_text(json.dumps({
-                            "ok": True,
-                            "encrypt": wants_enc and crypto.available(),
+                            "ok":       True,
+                            "approved": is_approved,
+                            "encrypt":  wants_enc and crypto.available() and is_approved,
                         }))
 
                     elif t == "crypto_hello" and crypto.available():
-                        client_nonce = bytes.fromhex(data.get("nonce", ""))
-                        server_nonce = os.urandom(16)
-                        session_key  = crypto.derive_session_key(
-                            token, client_nonce, server_nonce
+                        client_nonce   = bytes.fromhex(data.get("nonce", ""))
+                        server_nonce   = os.urandom(16)
+                        agreed_cipher  = data.get("cipher", "chacha20")
+                        if agreed_cipher not in ("chacha20", "aes256gcm"):
+                            agreed_cipher = "chacha20"
+                        session_key    = crypto.derive_session_key(
+                            token, client_nonce, server_nonce, agreed_cipher
                         )
-                        self._session_keys[token] = session_key
+                        self._session_keys[token]   = session_key
+                        self._session_ciphers[token] = agreed_cipher
                         await websocket.send_text(json.dumps({
-                            "type": "crypto_ok", "nonce": server_nonce.hex(),
+                            "type":   "crypto_ok",
+                            "nonce":  server_nonce.hex(),
+                            "cipher": agreed_cipher,
                         }))
 
                     elif t == "pong":
@@ -258,8 +320,11 @@ class AgentRouter:
             finally:
                 duration = int(time.time() - self._connect_time.pop(token, time.time()))
                 self._connections.pop(token, None)
-                self._session_keys.pop(token, None)
+                dead_key = self._session_keys.pop(token, None)
+                crypto.zero_key(dead_key)
+                self._session_ciphers.pop(token, None)
                 self._registry.set_online(token, False)
+                crypto.zero_key(session_key)
                 session_key = None
                 self._audit.log("agent_disconnect", token=token,
                                 agent_name=agent["name"],
@@ -518,7 +583,9 @@ class AgentRouter:
         def _check_admin(creds: HTTPAuthorizationCredentials = Depends(security)):
             if not self._admin_token:
                 return
-            if not creds or creds.credentials != self._admin_token:
+            token_ok = (creds is not None and
+                        hmac.compare_digest(creds.credentials, self._admin_token))
+            if not token_ok:
                 raise HTTPException(401, "Nevalidan admin token")
 
         # ── Models ────────────────────────────────────────────────────────────
@@ -532,6 +599,38 @@ class AgentRouter:
             rules: list[str]
 
         # ── Token operacije ───────────────────────────────────────────────────
+
+        @router.post(f"{prefix}/invite", dependencies=[Depends(_check_admin)])
+        def create_invite(req: CreateRequest, request: Request):
+            """Kreira invite token koji važi 5 minuta za prvu konekciju."""
+            token = self._registry.create(req.name, req.note, req.rules, invite_minutes=5)
+            self._audit.log("invite_create",
+                            token=token, agent_name=req.name,
+                            detail={"note": req.note},
+                            ip=request.client.host if request.client else "")
+            return {"token": token, "name": req.name, "invite": True, "expires_in": 300}
+
+        @router.post(f"{prefix}/{{token}}/approve", dependencies=[Depends(_check_admin)])
+        def approve_agent(token: str, request: Request):
+            """Admin odobrava pending agenta — HWID se vezuje trajno."""
+            agent = self._registry.get(token)
+            if not agent:
+                raise HTTPException(404, "Agent nije pronađen")
+            if agent.get("approved"):
+                raise HTTPException(400, "Agent je već odobren")
+            if not agent.get("hwid"):
+                raise HTTPException(400, "Agent još nije poslao HWID — čekaj konekciju")
+            self._registry.approve(token)
+            self._audit.log("agent_approve",
+                            token=token, agent_name=agent["name"],
+                            detail={"hwid": agent["hwid"][:16]},
+                            ip=request.client.host if request.client else "")
+            return {"ok": True, "hwid": agent["hwid"][:16]}
+
+        @router.get(f"{prefix}/pending", dependencies=[Depends(_check_admin)])
+        def list_pending():
+            """Lista agenata koji čekaju odobrenje."""
+            return self._registry.list_pending()
 
         @router.post(f"{prefix}/token", dependencies=[Depends(_check_admin)])
         def create_token(req: CreateRequest, request: Request):
@@ -653,7 +752,9 @@ class AgentRouter:
             """Jednostavan endpoint za validaciju admin tokena — 200 OK ili 401."""
             if not self._admin_token:
                 return {"ok": True}
-            if not creds or creds.credentials != self._admin_token:
+            token_ok = (creds is not None and
+                        hmac.compare_digest(creds.credentials, self._admin_token))
+            if not token_ok:
                 raise HTTPException(401, "Nevalidan token")
             return {"ok": True}
 
