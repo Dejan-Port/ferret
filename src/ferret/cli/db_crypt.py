@@ -76,7 +76,7 @@ def _collect_network() -> list[str]:
     cols = line.split()
 
     if "via" not in cols:
-        log.error("Mrežni otisak: ne mogu da pronađem default gateway (ip route get 1.1.1.1)")
+        log.error("Mrežni otisak: provera nije uspela [gw]")
         sys.exit(1)
 
     gw_ip = cols[cols.index("via") + 1]
@@ -85,7 +85,7 @@ def _collect_network() -> list[str]:
 
     # Subnet lokalne mreže
     if not iface:
-        log.error("Mrežni otisak: ne mogu da pronađem mrežni interfejs")
+        log.error("Mrežni otisak: provera nije uspela [iface]")
         sys.exit(1)
 
     r2 = subprocess.run(["ip", "-o", "-4", "addr", "show", iface],
@@ -98,7 +98,7 @@ def _collect_network() -> list[str]:
             break
 
     if not subnet:
-        log.error("Mrežni otisak: ne mogu da pronađem subnet na interfejsu %s", iface)
+        log.error("Mrežni otisak: provera nije uspela [subnet]")
         sys.exit(1)
     parts.append(f"subnet:{subnet}")
 
@@ -115,7 +115,7 @@ def _collect_network() -> list[str]:
             break
 
     if not gw_mac:
-        log.error("Mrežni otisak: ne mogu da pronađem MAC gateway-a %s iz ARP tabele", gw_ip)
+        log.error("Mrežni otisak: provera nije uspela [arp]")
         sys.exit(1)
     parts.append(f"gw_mac:{gw_mac}")
 
@@ -134,8 +134,8 @@ def _collect_network() -> list[str]:
             break
 
     if not hop2:
-        log.error("Mrežni otisak: traceroute hop2 nije dostupan — "
-                  "instalirajte traceroute i proverite da ICMP nije blokiran")
+        log.error("Mrežni otisak: provera nije uspela [hop2] — "
+                  "proverite da je 'traceroute' instaliran")
         sys.exit(1)
     parts.append(f"hop2:{hop2}")
 
