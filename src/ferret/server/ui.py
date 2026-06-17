@@ -145,7 +145,7 @@ code.token-cell:hover{{border-color:#3b5bdb}}
 <body>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
   <h1>Agent Manager</h1>
-  <a href="audit" style="font-size:12px;color:#8b93a7;text-decoration:none;background:#1e2235;border:1px solid #2d3354;border-radius:6px;padding:6px 14px">📋 Audit log</a>
+  <a href="#" onclick="window.location='audit?admin='+encodeURIComponent(localStorage.getItem('adminToken')||'');return false;" style="font-size:12px;color:#8b93a7;text-decoration:none;background:#1e2235;border:1px solid #2d3354;border-radius:6px;padding:6px 14px">📋 Audit log</a>
 </div>
 <p class="subtitle">Upravljanje outbound agentima i ACL pravilima</p>
 
