@@ -323,8 +323,9 @@ See `example/ferret-server.service.example` for the full unit file.
 
 | Property | Detail |
 |----------|--------|
-| Key source | DMI UUID + board/chassis serial + CPU model + disk serials |
-| Minimum sources | 2 hardware identifiers required; fails safe otherwise |
+| Key source | DMI UUID + board/chassis serial + CPU model + disk serials + network fingerprint |
+| Hardware minimum | 2 hardware identifiers required; fails safe otherwise |
+| Network fingerprint | Default gateway IP, local subnet, gateway MAC (ARP), first WAN hop (traceroute TTL=2) |
 | Key derivation | HKDF-SHA256, 64-byte output, random 32-byte salt per init |
 | In-memory key | `memfd_create` + `mlock` — key never written to disk or swap |
 | Audit log | Append-only (`chattr +a`) JSON log at `/var/log/ferret-db-audit.log` |

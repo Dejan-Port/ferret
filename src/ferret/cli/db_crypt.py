@@ -56,12 +56,83 @@ def _read_safe(path: str) -> str:
     return ""
 
 
+def _collect_network() -> list[str]:
+    """
+    Mrežni otisak servera: putanja do gateway-a, subnet, MAC gateway-a i
+    prvi hop iza gateway-a (switch/ruter prema internetu).
+
+    Sve su opcione — ako neka ne uspe, preskačemo je tiho.
+    Ove vrednosti se menjaju samo ako server fizički premestimo na drugu mrežu.
+    """
+    parts = []
+    try:
+        # Putanja do interneta: gateway IP + interface + lokalna IP
+        r = subprocess.run(["ip", "route", "get", "1.1.1.1"],
+                           capture_output=True, text=True, timeout=5)
+        line = r.stdout.splitlines()[0] if r.stdout.strip() else ""
+        cols = line.split()
+
+        gw_ip = cols[cols.index("via") + 1]  if "via"  in cols else ""
+        iface = cols[cols.index("dev") + 1]  if "dev"  in cols else ""
+        src   = cols[cols.index("src") + 1]  if "src"  in cols else ""
+
+        if gw_ip:
+            parts.append(f"gw:{gw_ip}")
+
+        # Subnet lokalne mreže (npr. 192.168.1.100/24)
+        if iface:
+            r2 = subprocess.run(["ip", "-o", "-4", "addr", "show", iface],
+                                capture_output=True, text=True, timeout=5)
+            for aline in r2.stdout.splitlines():
+                acols = aline.split()
+                if len(acols) >= 4 and "/" in acols[3]:
+                    parts.append(f"subnet:{acols[3]}")
+                    break
+
+        # MAC gateway-a iz ARP tabele (ping da osvežimo cache)
+        if gw_ip:
+            subprocess.run(["ping", "-c", "1", "-W", "1", gw_ip],
+                           capture_output=True, timeout=3)
+            r3 = subprocess.run(["ip", "neigh", "show", gw_ip],
+                                capture_output=True, text=True, timeout=5)
+            for nline in r3.stdout.splitlines():
+                if "lladdr" in nline:
+                    ncols = nline.split()
+                    mac = ncols[ncols.index("lladdr") + 1]
+                    parts.append(f"gw_mac:{mac}")
+                    break
+
+        # Pierwszy hop iza gateway-a = switch/ruter prema internetu
+        # traceroute -n -m 2 -w 1 -q 1: max 2 hopa, 1s timeout, 1 probe
+        try:
+            r4 = subprocess.run(
+                ["traceroute", "-n", "-m", "2", "-w", "1", "-q", "1", "1.1.1.1"],
+                capture_output=True, text=True, timeout=12
+            )
+            for tline in r4.stdout.splitlines():
+                tline = tline.strip()
+                if tline.startswith("2 "):
+                    hop_cols = tline.split()
+                    if len(hop_cols) >= 2 and hop_cols[1] != "*":
+                        parts.append(f"hop2:{hop_cols[1]}")
+                    break
+        except Exception:
+            pass
+
+    except Exception:
+        pass
+
+    return parts
+
+
 def collect_hwid() -> str:
     global _hwid_cache
     if _hwid_cache is not None:
         return _hwid_cache
 
     parts = []
+
+    # ── Hardware identifikatori ───────────────────────────────────────────────
     for dmi in [
         "/sys/class/dmi/id/product_uuid",
         "/sys/class/dmi/id/board_serial",
@@ -96,7 +167,11 @@ def collect_hwid() -> str:
         log.error("Premalo hardware identifikatora (%d) — nije bezbedno nastaviti", len(parts))
         sys.exit(1)
 
-    log.debug("HWID: %d komponenti", len(parts))
+    # ── Mrežni otisak (lokacija servera) ─────────────────────────────────────
+    net_parts = _collect_network()
+    parts.extend(net_parts)
+    log.debug("HWID: %d hw + %d net komponenti", len(parts) - len(net_parts), len(net_parts))
+
     _hwid_cache = "|".join(parts)
     return _hwid_cache
 
