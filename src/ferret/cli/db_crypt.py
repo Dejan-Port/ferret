@@ -119,25 +119,32 @@ def _collect_network() -> list[str]:
         sys.exit(1)
     parts.append(f"gw_mac:{gw_mac}")
 
-    # Prvi hop iza gateway-a (switch/ruter prema internetu), traceroute TTL=2
+    # Prvi WAN hop iza gateway-a — skeniramo hopove 2-5, uzimamo prvi koji odgovara.
+    # Neki ISP ruteri ne odgovaraju na ICMP TTL exceeded (vraćaju *), pa ne možemo
+    # da se oslonimo striktno na hop 2.
     r4 = subprocess.run(
-        ["traceroute", "-n", "-m", "2", "-w", "2", "-q", "1", "1.1.1.1"],
-        capture_output=True, text=True, timeout=15
+        ["traceroute", "-n", "-m", "5", "-w", "2", "-q", "1", "1.1.1.1"],
+        capture_output=True, text=True, timeout=20
     )
-    hop2 = ""
+    wan_hop = ""
     for tline in r4.stdout.splitlines():
         tline = tline.strip()
-        if tline.startswith("2 "):
-            hop_cols = tline.split()
-            if len(hop_cols) >= 2 and hop_cols[1] != "*":
-                hop2 = hop_cols[1]
+        # Redovi hopova izgledaju kao "2  192.168.x.x  1.2 ms" ili "2  *"
+        parts_t = tline.split()
+        if not parts_t or not parts_t[0].isdigit():
+            continue
+        hop_num = int(parts_t[0])
+        if hop_num < 2:
+            continue
+        if len(parts_t) >= 2 and parts_t[1] != "*":
+            wan_hop = parts_t[1]
             break
 
-    if not hop2:
-        log.error("Mrežni otisak: provera nije uspela [hop2] — "
+    if not wan_hop:
+        log.error("Mrežni otisak: provera nije uspela [wan_hop] — "
                   "proverite da je 'traceroute' instaliran")
         sys.exit(1)
-    parts.append(f"hop2:{hop2}")
+    parts.append(f"wan_hop:{wan_hop}")
 
     return parts
 
