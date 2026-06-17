@@ -47,9 +47,10 @@ The agent creates a TUN interface and connects outbound. The server assigns a VP
 - **Full LAN access** — reach every device on the agent's network, not just the agent
 - **Native subnet replication** — via NETMAP, the remote LAN appears on a local subnet; devices are reachable as if you were physically on the same network (e.g. remote `192.168.1.x` → local `10.8.0.x`, same structure, no manual IP mapping)
 - **Per-agent ACL** — restrict which ports/IPs are accessible, hot-reloadable without disconnect
-- **mTLS** — per-agent client certificates, CA pinned in agent
-- **Hardware binding** — token tied to machine via HMAC of DMI/BIOS data + local secret
-- **Token rotation** — versioned secrets, retire old keys instantly
+- **Invite tokens** — 5-minute short-lived tokens; HWID auto-bound on first connect; admin approves
+- **Hardware binding** — client HWID and server HWID both bound into token via HMAC; stolen token unusable on different hardware
+- **Token rotation** — versioned secrets (`kid`), retire old keys after natural expiry
+- **Rate limiting** — IP-based backoff on failed connection attempts
 - **Audit log** — every connection, proxy open, rule change, token event — filterable UI
 - **One-line installer** — server generates a bash/PowerShell script with all credentials embedded
 - **TCP proxy** — tunnel RDP, SSH, VNC to any host on agent's LAN
@@ -130,6 +131,106 @@ WantedBy=multi-user.target
 EOF
 
 sudo systemctl enable --now ferret-tun
+```
+
+---
+
+## Token management
+
+### Standard token
+
+Created via API or admin UI. Valid immediately, no expiry by default.
+
+```bash
+# Via CLI
+ferret-server token create "Office router" --rules "tcp:22,tcp:3389"
+
+# Via API
+curl -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+     -X POST https://your-server/agents/tokens \
+     -d '{"name": "Office router", "rules": ["tcp:22", "tcp:3389"]}'
+```
+
+### Invite token (5-minute, HWID-bound)
+
+For deploying agents securely without pre-sharing a permanent token. The invite is valid for 5 minutes — just long enough for the agent to make its first connection. After first connect, the server records the agent's hardware fingerprint (HWID). On every subsequent connection, the HWID must match.
+
+```
+  Admin creates invite (5 min)
+       │
+       ▼
+  Agent connects → server records HWID
+       │
+       ▼
+  Admin approves in UI (sees HWID, confirms it's the right machine)
+       │
+       ▼
+  Agent: permanent, bound to that hardware forever
+```
+
+If the invite expires before first use, it's dead — create a new one. If someone else gets the invite token but connects from a different machine, admin sees the wrong HWID and rejects it.
+
+```bash
+# API
+curl -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+     -X POST https://your-server/agents/invite \
+     -d '{"name": "Branch office", "rules": ["tcp:22"]}'
+# Returns token valid for 5 minutes
+
+# Agent uses it like any token
+ferret --token INVITE_TOKEN --server wss://your-server/ws/agent
+# After connecting, waits for admin approval
+```
+
+### Token rotation
+
+Retire old signing secrets without disconnecting existing agents. Old tokens remain valid until they expire naturally.
+
+```python
+from ferret.server.token_gen import TokenGen
+
+gen = TokenGen(
+    secrets={"v1": "old-secret-32chars+", "v2": "new-secret-32chars+"},
+    active="v2"
+)
+# New tokens signed with v2; existing v1 tokens still validate
+gen.retire("v1")  # only after all v1 tokens have expired
+```
+
+### Server HWID binding
+
+Tokens can be bound to a specific server's hardware. Even if an attacker steals both the database and the signing secret, tokens cannot be replayed on a different server.
+
+```python
+gen.create(
+    hw_id="client-hardware-fingerprint",
+    name="Branch office",
+    server_hw_id="server-hardware-fingerprint",  # from ferret.hw_id.get() on server
+)
+```
+
+---
+
+## Access control (ACL)
+
+Per-agent rules. Empty rules = agent cannot open any proxy tunnel.
+
+```
+"tcp:22"    — SSH only
+"tcp:3389"  — RDP only
+"udp:161"   — SNMP only
+"tcp:*"     — all TCP
+"udp:*"     — all UDP
+"*:*"       — everything (TCP + UDP)
+```
+
+Rules are hot-reloadable — change takes effect on the next proxy request, no reconnect needed.
+
+```bash
+# Update rules via API
+curl -H "Authorization: Bearer YOUR_ADMIN_TOKEN" \
+     -X PUT https://your-server/agents/TOKEN/rules \
+     -d '{"rules": ["tcp:22", "tcp:443"]}'
 ```
 
 ---
@@ -236,12 +337,17 @@ See `example/ferret-server.service.example` for the full unit file.
 | Layer | Mechanism |
 |-------|-----------|
 | Transport | TLS 1.3 (WebSocket over HTTPS) |
-| Authentication | Signed token (HMAC-SHA256) + mTLS client certificate |
-| Hardware binding | `HMAC(machine.key, BIOS+DMI+MAC)` — machine.key never leaves device |
-| Server binding | Token contains `HMAC(secret, server_hw_id)` — agent refuses wrong server |
-| Application crypto | ChaCha20-Poly1305 AEAD, HKDF-SHA256 session keys |
-| Access control | Per-agent iptables chains, hot-reloadable |
-| Audit | SQLite log of every event, filterable UI |
+| Token signing | HMAC-SHA256, `kid`-versioned, supports rotation + retire |
+| Client HWID | Token stores `HMAC(secret, hw_id)` — plain fingerprint never in token |
+| Server HWID | Token stores `HMAC(secret, server_hw_id)` — token invalid on different hardware |
+| HWID binding | Invite tokens bind HWID on first connect; enforced on all subsequent connects |
+| Application crypto | ChaCha20-Poly1305 AEAD, HKDF-SHA256 session keys, per-session nonce |
+| Access control | Per-agent ACL rules, hot-reloadable, deny-by-default |
+| Rate limiting | IP-based failed-attempt counter, exponential backoff |
+| Audit | SQLite log of every event, filterable UI at `/agents/audit` |
+| Server storage | LUKS container, HWID-bound key, `memfd_create` + `mlock` |
+
+**Audit events:** `agent_connect`, `agent_disconnect`, `proxy_open`, `proxy_deny`, `tun_start`, `tun_stop`, `token_create`, `token_revoke`, `rules_change`, `invite_create`, `agent_approve`, `admin_access`
 
 No traffic passes through third-party infrastructure. Ever.
 
