@@ -58,69 +58,86 @@ def _read_safe(path: str) -> str:
 
 def _collect_network() -> list[str]:
     """
-    Mrežni otisak servera: putanja do gateway-a, subnet, MAC gateway-a i
-    prvi hop iza gateway-a (switch/ruter prema internetu).
+    Mrežni otisak servera — SVE stavke su obavezne.
+    Ako bilo koja ne uspe, ferret-db odbija da nastavi.
 
-    Sve su opcione — ako neka ne uspe, preskačemo je tiho.
-    Ove vrednosti se menjaju samo ako server fizički premestimo na drugu mrežu.
+    Skuplja:
+      gw:       IP default gateway-a
+      subnet:   lokalni subnet CIDR (npr. 192.168.1.100/24)
+      gw_mac:   MAC adresa gateway-a iz ARP tabele
+      hop2:     IP prvog hopa iza gateway-a (switch/ruter prema internetu)
     """
     parts = []
-    try:
-        # Putanja do interneta: gateway IP + interface + lokalna IP
-        r = subprocess.run(["ip", "route", "get", "1.1.1.1"],
-                           capture_output=True, text=True, timeout=5)
-        line = r.stdout.splitlines()[0] if r.stdout.strip() else ""
-        cols = line.split()
 
-        gw_ip = cols[cols.index("via") + 1]  if "via"  in cols else ""
-        iface = cols[cols.index("dev") + 1]  if "dev"  in cols else ""
-        src   = cols[cols.index("src") + 1]  if "src"  in cols else ""
+    # Putanja do interneta → gateway IP + interface
+    r = subprocess.run(["ip", "route", "get", "1.1.1.1"],
+                       capture_output=True, text=True, timeout=5)
+    line = r.stdout.splitlines()[0] if r.stdout.strip() else ""
+    cols = line.split()
 
-        if gw_ip:
-            parts.append(f"gw:{gw_ip}")
+    if "via" not in cols:
+        log.error("Mrežni otisak: ne mogu da pronađem default gateway (ip route get 1.1.1.1)")
+        sys.exit(1)
 
-        # Subnet lokalne mreže (npr. 192.168.1.100/24)
-        if iface:
-            r2 = subprocess.run(["ip", "-o", "-4", "addr", "show", iface],
-                                capture_output=True, text=True, timeout=5)
-            for aline in r2.stdout.splitlines():
-                acols = aline.split()
-                if len(acols) >= 4 and "/" in acols[3]:
-                    parts.append(f"subnet:{acols[3]}")
-                    break
+    gw_ip = cols[cols.index("via") + 1]
+    iface = cols[cols.index("dev") + 1] if "dev" in cols else ""
+    parts.append(f"gw:{gw_ip}")
 
-        # MAC gateway-a iz ARP tabele (ping da osvežimo cache)
-        if gw_ip:
-            subprocess.run(["ping", "-c", "1", "-W", "1", gw_ip],
-                           capture_output=True, timeout=3)
-            r3 = subprocess.run(["ip", "neigh", "show", gw_ip],
-                                capture_output=True, text=True, timeout=5)
-            for nline in r3.stdout.splitlines():
-                if "lladdr" in nline:
-                    ncols = nline.split()
-                    mac = ncols[ncols.index("lladdr") + 1]
-                    parts.append(f"gw_mac:{mac}")
-                    break
+    # Subnet lokalne mreže
+    if not iface:
+        log.error("Mrežni otisak: ne mogu da pronađem mrežni interfejs")
+        sys.exit(1)
 
-        # Pierwszy hop iza gateway-a = switch/ruter prema internetu
-        # traceroute -n -m 2 -w 1 -q 1: max 2 hopa, 1s timeout, 1 probe
-        try:
-            r4 = subprocess.run(
-                ["traceroute", "-n", "-m", "2", "-w", "1", "-q", "1", "1.1.1.1"],
-                capture_output=True, text=True, timeout=12
-            )
-            for tline in r4.stdout.splitlines():
-                tline = tline.strip()
-                if tline.startswith("2 "):
-                    hop_cols = tline.split()
-                    if len(hop_cols) >= 2 and hop_cols[1] != "*":
-                        parts.append(f"hop2:{hop_cols[1]}")
-                    break
-        except Exception:
-            pass
+    r2 = subprocess.run(["ip", "-o", "-4", "addr", "show", iface],
+                        capture_output=True, text=True, timeout=5)
+    subnet = ""
+    for aline in r2.stdout.splitlines():
+        acols = aline.split()
+        if len(acols) >= 4 and "/" in acols[3]:
+            subnet = acols[3]
+            break
 
-    except Exception:
-        pass
+    if not subnet:
+        log.error("Mrežni otisak: ne mogu da pronađem subnet na interfejsu %s", iface)
+        sys.exit(1)
+    parts.append(f"subnet:{subnet}")
+
+    # MAC gateway-a iz ARP tabele (ping da osvežimo cache)
+    subprocess.run(["ping", "-c", "1", "-W", "1", gw_ip],
+                   capture_output=True, timeout=3)
+    r3 = subprocess.run(["ip", "neigh", "show", gw_ip],
+                        capture_output=True, text=True, timeout=5)
+    gw_mac = ""
+    for nline in r3.stdout.splitlines():
+        if "lladdr" in nline:
+            ncols = nline.split()
+            gw_mac = ncols[ncols.index("lladdr") + 1]
+            break
+
+    if not gw_mac:
+        log.error("Mrežni otisak: ne mogu da pronađem MAC gateway-a %s iz ARP tabele", gw_ip)
+        sys.exit(1)
+    parts.append(f"gw_mac:{gw_mac}")
+
+    # Prvi hop iza gateway-a (switch/ruter prema internetu), traceroute TTL=2
+    r4 = subprocess.run(
+        ["traceroute", "-n", "-m", "2", "-w", "2", "-q", "1", "1.1.1.1"],
+        capture_output=True, text=True, timeout=15
+    )
+    hop2 = ""
+    for tline in r4.stdout.splitlines():
+        tline = tline.strip()
+        if tline.startswith("2 "):
+            hop_cols = tline.split()
+            if len(hop_cols) >= 2 and hop_cols[1] != "*":
+                hop2 = hop_cols[1]
+            break
+
+    if not hop2:
+        log.error("Mrežni otisak: traceroute hop2 nije dostupan — "
+                  "instalirajte traceroute i proverite da ICMP nije blokiran")
+        sys.exit(1)
+    parts.append(f"hop2:{hop2}")
 
     return parts
 
