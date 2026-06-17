@@ -304,8 +304,10 @@ The LUKS header is stored separately at `/etc/ferret/db.header`. Back it up — 
 sudo ferret-db unlock   # open + mount (called automatically by systemd)
 sudo ferret-db lock     # unmount + close
 sudo ferret-db status   # check state
-sudo ferret-db reset    # re-key after hardware replacement (audit logged)
+sudo ferret-db reset    # re-key after hardware or network change (audit logged)
 ```
+
+> **Note:** The network fingerprint includes the first reachable WAN hop IP. If your ISP changes their routing and this IP changes, the container will fail to unlock after reboot. Run `sudo ferret-db reset` to bind to the new network topology.
 
 ### systemd integration
 
