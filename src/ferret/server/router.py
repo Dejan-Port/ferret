@@ -775,7 +775,7 @@ class AgentRouter:
                     raise HTTPException(401, "Nevalidan admin token")
             events = self._audit.recent(limit=300, token=token or None, event=event or None)
             agents = self._registry.list_all()
-            return _render_audit(events, agents, token, event)
+            return _render_audit(events, agents, token, event, provided)
 
 
 # ── Audit UI ──────────────────────────────────────────────────────────────────
@@ -807,7 +807,7 @@ _EVENT_ICONS = {
 }
 
 
-def _render_audit(events, agents, filter_token, filter_event) -> str:
+def _render_audit(events, agents, filter_token, filter_event, admin_token="") -> str:
     agent_options = "".join(
         f'<option value="{a["token"][:16]}"'
         f'{" selected" if filter_token == a["token"][:16] else ""}>'
@@ -886,6 +886,7 @@ tr:hover td{{background:#1a1d27}}
 
 <div class="toolbar">
   <form method="get" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <input type="hidden" name="admin" value="{_esc(admin_token)}">
     <div>
       <label>Agent</label>
       <select name="token">
@@ -901,7 +902,7 @@ tr:hover td{{background:#1a1d27}}
       </select>
     </div>
     <button type="submit" class="btn">Filtriraj</button>
-    <a href="audit" class="btn-ghost">Reset</a>
+    <a href="audit?admin={_esc(admin_token)}" class="btn-ghost">Reset</a>
   </form>
 </div>
 
