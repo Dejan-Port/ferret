@@ -53,6 +53,7 @@ The agent creates a TUN interface and connects outbound. The server assigns a VP
 - **Audit log** — every connection, proxy open, rule change, token event — filterable UI
 - **One-line installer** — server generates a bash/PowerShell script with all credentials embedded
 - **TCP proxy** — tunnel RDP, SSH, VNC to any host on agent's LAN
+- **Encrypted storage** — LUKS container bound to server hardware; stolen server cannot be decrypted without the original machine
 - **Self-hosted** — your server, your data, zero external dependencies
 
 ---
@@ -193,6 +194,8 @@ sudo ferret-db init --size 20
 ```
 
 The LUKS header is stored separately at `/etc/ferret/db.header`. Back it up — without it the container cannot be opened even with the correct hardware.
+
+> **Critical:** `/etc/ferret/db.salt` and `/etc/ferret/db.header` must be real files on the filesystem — **not** symlinks pointing inside `/db/secure`. The unlock process reads the salt to derive the key before the container is open. Placing the salt inside the container creates a circular dependency and makes the server unbootable.
 
 ### Daily operation
 
