@@ -764,9 +764,15 @@ class AgentRouter:
             agents = self._registry.list_all()
             return render_ui(agents)
 
-        @router.get(f"{prefix}/audit", response_class=HTMLResponse,
-                    dependencies=[Depends(_check_admin)])
-        def audit_ui(token: str = "", event: str = ""):
+        @router.get(f"{prefix}/audit", response_class=HTMLResponse)
+        def audit_ui(admin: str = "", token: str = "", event: str = "",
+                     creds: HTTPAuthorizationCredentials = Depends(
+                         HTTPBearer(auto_error=False))):
+            # Prihvata token i kao ?admin= query param (za direktan browser pristup)
+            provided = admin or (creds.credentials if creds else "")
+            if self._admin_token:
+                if not provided or not hmac.compare_digest(provided, self._admin_token):
+                    raise HTTPException(401, "Nevalidan admin token")
             events = self._audit.recent(limit=300, token=token or None, event=event or None)
             agents = self._registry.list_all()
             return _render_audit(events, agents, token, event)
