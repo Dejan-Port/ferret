@@ -208,10 +208,10 @@ class TunHandler:
                     self._lan_masq_active = False
                 except Exception:
                     pass
-            _run("ip", "link", "set", self._iface, "down")
             if self._tun:
                 self._tun.close()
                 self._tun = None
+            _run("ip", "link", "del", self._iface)
             log.info("TUN %s down", self._iface)
         except Exception as e:
             log.warning("TUN teardown greška: %s", e)
