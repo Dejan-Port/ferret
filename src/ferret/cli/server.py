@@ -5,7 +5,7 @@ Upotreba:
     ferret-server --admin-token moj-tajni-token
 
     ferret-server \\
-        --host 0.0.0.0 --port 8000 \\
+        --host :: --port 8000 \\
         --admin-token xyz \\
         --secret hw-kljuc-32-znaka \\
         --public-url wss://portal.mojafirma.rs/ws/agent \\
@@ -24,7 +24,7 @@ def main():
         prog="ferret-server",
         description="Outbound Agent portal server",
     )
-    p.add_argument("--host",        default=os.getenv("OA_HOST", "0.0.0.0"))
+    p.add_argument("--host",        default=os.getenv("OA_HOST", "::"))
     p.add_argument("--port",        default=int(os.getenv("OA_PORT", "8000")), type=int)
     p.add_argument("--admin-token", default=os.getenv("OA_ADMIN_TOKEN", ""),
                    help="Bearer token za admin API (obavezno za produkciju)")

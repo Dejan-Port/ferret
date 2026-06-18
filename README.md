@@ -72,7 +72,7 @@ ferret-server \
   --public-url https://yourname.ddns.net
 ```
 
-Only port 443 needs to be open. A static IP is not required — dynamic DNS (No-IP, DuckDNS) works fine, as long as the server has a real public IP. **CGNAT does not work** — if your ISP shares a public IP across multiple customers, run the server on a VPS instead.
+Only port 443 needs to be open. The server listens on `::` by default (dual-stack IPv4+IPv6). To bind IPv4 only: `--host 0.0.0.0`. A static IP is not required — dynamic DNS (No-IP, DuckDNS) works fine, as long as the server has a real public IP. **CGNAT does not work** — if your ISP shares a public IP across multiple customers, run the server on a VPS instead.
 
 Open `https://yourname.ddns.net/agents/ui` — admin UI with token management and agent status.
 
