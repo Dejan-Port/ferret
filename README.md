@@ -61,10 +61,27 @@ The agent creates a TUN interface and connects outbound. The server assigns a VP
 
 ## Quick start
 
+### Installation
+
+```bash
+# Latest release directly from GitHub
+pip install https://github.com/Dejan-Port/ferret/releases/download/v0.1.0/ferret_agent-0.1.0-py3-none-any.whl
+
+# With server components
+pip install "ferret_agent-0.1.0-py3-none-any.whl[server]"
+
+# Force reinstall (same version, updated wheel)
+pip install --force-reinstall <wheel-url-or-path>
+```
+
+> **Note:** Ferret is not yet on PyPI. Install directly from the GitHub Release asset above.
+
+---
+
 ### Server (static IP or dynamic DNS)
 
 ```bash
-pip install "ferret-agent[server]"
+pip install "https://github.com/Dejan-Port/ferret/releases/download/v0.1.0/ferret_agent-0.1.0-py3-none-any.whl[server]"
 
 ferret-server \
   --admin-token your-secret-token \
