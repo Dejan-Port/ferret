@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ferret-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Ferret — self-hosted outbound tunnel agent. No port forwarding, no third-party cloud."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -38,8 +38,8 @@ ferret-gui     = "ferret.gui.tray:main"
 ferret-db      = "ferret.cli.db_crypt:main"
 
 [project.urls]
-Homepage   = "https://github.com/ferret-agent/ferret"
-Issues     = "https://github.com/ferret-agent/ferret/issues"
+Homepage   = "https://github.com/Dejan-Port/ferret"
+Issues     = "https://github.com/Dejan-Port/ferret/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]
