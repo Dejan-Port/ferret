@@ -84,30 +84,50 @@ def render_ui(agents: list[dict]) -> str:
 <title>🐾 Agent Manager</title>
 <link rel="icon" href="https://www.servisport.rs/favicon.ico">
 <style>
+:root {{
+  --bg:#0f1117;--bg2:#151821;--bg3:#1e2235;--border:#252840;--border2:#2d3354;
+  --text:#e2e4ed;--text2:#8b93a7;--text3:#4b5270;
+  --acc:#3b5bdb;--acc2:#2f4ac0;--token:#7dd3fc;
+}}
+.theme-midnight {{
+  --bg:#09090f;--bg2:#0f0f1a;--bg3:#16162a;--border:#1e1e35;--border2:#28284a;
+  --text:#dde1f5;--text2:#7b82a8;--text3:#3d4270;
+  --acc:#6366f1;--acc2:#4f46e5;--token:#a5b4fc;
+}}
+.theme-ocean {{
+  --bg:#020d1a;--bg2:#061524;--bg3:#0a2038;--border:#0e2d4a;--border2:#143d60;
+  --text:#cce8ff;--text2:#6a9bbf;--text3:#2e5a7a;
+  --acc:#0ea5e9;--acc2:#0284c7;--token:#7dd3fc;
+}}
+.theme-light {{
+  --bg:#f1f3f9;--bg2:#ffffff;--bg3:#e8ecf5;--border:#d0d5e8;--border2:#b8bfd6;
+  --text:#1e2235;--text2:#4b5270;--text3:#8b93a7;
+  --acc:#3b5bdb;--acc2:#2f4ac0;--token:#1d4ed8;
+}}
 *{{box-sizing:border-box;margin:0;padding:0}}
-body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e2e4ed;padding:32px}}
-h1{{font-size:20px;font-weight:700;margin-bottom:6px;color:#fff}}
-.subtitle{{font-size:12px;color:#4b5270;margin-bottom:28px}}
-.card{{background:#151821;border:1px solid #252840;border-radius:10px;padding:24px;margin-bottom:24px}}
-.card h2{{font-size:11px;font-weight:600;color:#8b93a7;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:18px}}
+body{{font-family:'Segoe UI',system-ui,sans-serif;background:var(--bg);color:var(--text);padding:32px;transition:background .2s,color .2s}}
+h1{{font-size:20px;font-weight:700;margin-bottom:6px;color:var(--text)}}
+.subtitle{{font-size:12px;color:var(--text3);margin-bottom:28px}}
+.card{{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:24px;margin-bottom:24px}}
+.card h2{{font-size:11px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:1.2px;margin-bottom:18px}}
 .form-row{{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}}
-label{{display:block;font-size:10px;color:#8b93a7;margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}}
-input[type=text]{{background:#1e2235;border:1px solid #2d3354;border-radius:7px;color:#e2e4ed;font-family:inherit;font-size:13px;padding:8px 12px;outline:none;min-width:180px}}
-input[type=text]:focus{{border-color:#3b5bdb}}
+label{{display:block;font-size:10px;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}}
+input[type=text],input[type=password]{{background:var(--bg3);border:1px solid var(--border2);border-radius:7px;color:var(--text);font-family:inherit;font-size:13px;padding:8px 12px;outline:none;min-width:180px}}
+input[type=text]:focus,input[type=password]:focus{{border-color:var(--acc)}}
 .rules-builder{{margin-top:14px}}
 .presets{{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}}
-.preset-btn{{padding:4px 10px;background:#1e2235;border:1px solid #2d3354;border-radius:20px;color:#8b93a7;font-size:12px;cursor:pointer;font-family:inherit;transition:all .12s}}
-.preset-btn:hover{{border-color:#3b5bdb;color:#e2e4ed}}
-.preset-btn.active{{background:#1e3a8a;border-color:#3b5bdb;color:#bfdbfe}}
-.rules-tags{{display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:8px 10px;background:#0f1117;border:1px solid #252840;border-radius:7px;align-items:center;margin-bottom:10px}}
-.rule-tag{{display:inline-flex;align-items:center;gap:5px;background:#1e2235;border:1px solid #2d3354;border-radius:4px;padding:3px 8px;font-size:12px;font-family:monospace;color:#7dd3fc}}
-.rule-tag button{{background:none;border:none;color:#4b5270;cursor:pointer;font-size:14px;line-height:1;padding:0}}
+.preset-btn{{padding:4px 10px;background:var(--bg3);border:1px solid var(--border2);border-radius:20px;color:var(--text2);font-size:12px;cursor:pointer;font-family:inherit;transition:all .12s}}
+.preset-btn:hover{{border-color:var(--acc);color:var(--text)}}
+.preset-btn.active{{background:#1e3a8a;border-color:var(--acc);color:#bfdbfe}}
+.rules-tags{{display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:7px;align-items:center;margin-bottom:10px}}
+.rule-tag{{display:inline-flex;align-items:center;gap:5px;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:3px 8px;font-size:12px;font-family:monospace;color:var(--token)}}
+.rule-tag button{{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;line-height:1;padding:0}}
 .rule-tag button:hover{{color:#fca5a5}}
 .custom-rule-row{{display:flex;gap:6px}}
 .custom-rule-row input{{min-width:140px;font-family:monospace}}
-.rule-badge{{display:inline-block;background:#1e2235;border:1px solid #2d3354;border-radius:4px;padding:2px 7px;font-size:11px;font-family:monospace;color:#7dd3fc;margin:1px}}
-.btn{{padding:8px 18px;background:#3b5bdb;color:#fff;border:none;border-radius:7px;font-size:13px;cursor:pointer;font-family:inherit;transition:background .12s}}
-.btn:hover{{background:#2f4ac0}}
+.rule-badge{{display:inline-block;background:var(--bg3);border:1px solid var(--border2);border-radius:4px;padding:2px 7px;font-size:11px;font-family:monospace;color:var(--token);margin:1px}}
+.btn{{padding:8px 18px;background:var(--acc);color:#fff;border:none;border-radius:7px;font-size:13px;cursor:pointer;font-family:inherit;transition:background .12s}}
+.btn:hover{{background:var(--acc2)}}
 .btn-green{{background:#166534;color:#86efac}}
 .btn-green:hover{{background:#15803d}}
 .btn-sm{{padding:4px 10px;border:none;border-radius:5px;font-size:12px;cursor:pointer;font-family:inherit}}
@@ -121,32 +141,47 @@ input[type=text]:focus{{border-color:#3b5bdb}}
 .btn-linux:hover{{background:#14532d}}
 .btn-win{{background:#1e2a3a;color:#93c5fd;font-size:13px}}
 .btn-win:hover{{background:#1e3a8a}}
-.btn-ghost{{padding:8px 16px;background:#1e2235;color:#e2e4ed;border:none;border-radius:7px;font-size:13px;cursor:pointer;font-family:inherit}}
-.btn-copy-token{{background:none;border:none;color:#4b5270;cursor:pointer;font-size:14px;padding:0 4px;vertical-align:middle}}
-.btn-copy-token:hover{{color:#7dd3fc}}
+.btn-ghost{{padding:8px 16px;background:var(--bg3);color:var(--text);border:1px solid var(--border2);border-radius:7px;font-size:13px;cursor:pointer;font-family:inherit;text-decoration:none;display:inline-block}}
+.btn-ghost:hover{{border-color:var(--acc)}}
+.btn-copy-token{{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0 4px;vertical-align:middle}}
+.btn-copy-token:hover{{color:var(--token)}}
 table{{width:100%;border-collapse:collapse;font-size:13px}}
-th{{text-align:left;font-size:10px;color:#4b5270;text-transform:uppercase;letter-spacing:.8px;padding:8px 12px;border-bottom:1px solid #252840}}
-td{{padding:9px 12px;border-bottom:1px solid #1a1d27;vertical-align:middle}}
+th{{text-align:left;font-size:10px;color:var(--text3);text-transform:uppercase;letter-spacing:.8px;padding:8px 12px;border-bottom:1px solid var(--border)}}
+td{{padding:9px 12px;border-bottom:1px solid var(--bg3);vertical-align:middle}}
 tr.revoked td{{opacity:.35}}
 tr:last-child td{{border-bottom:none}}
-code.token-cell{{background:#1e2235;border-radius:4px;padding:2px 7px;font-size:12px;color:#7dd3fc;cursor:pointer;font-family:monospace;border:1px solid #2d3354}}
-code.token-cell:hover{{border-color:#3b5bdb}}
+tr:hover td{{background:var(--bg3)}}
+code.token-cell{{background:var(--bg3);border-radius:4px;padding:2px 7px;font-size:12px;color:var(--token);cursor:pointer;font-family:monospace;border:1px solid var(--border2)}}
+code.token-cell:hover{{border-color:var(--acc)}}
 .overlay{{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:100;display:none;align-items:center;justify-content:center}}
-.modal{{background:#151821;border:1px solid #252840;border-radius:12px;padding:28px;max-width:520px;width:90%}}
-.modal h2{{font-size:15px;font-weight:600;margin-bottom:6px;color:#fff}}
-.modal p{{font-size:12px;color:#8b93a7;margin-bottom:14px}}
-.token-box{{display:block;background:#0f1117;border:1px solid #252840;border-radius:8px;padding:14px;font-size:12px;color:#7dd3fc;word-break:break-all;margin-bottom:10px;font-family:monospace;user-select:all}}
+.modal{{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:28px;max-width:520px;width:90%}}
+.modal h2{{font-size:15px;font-weight:600;margin-bottom:6px;color:var(--text)}}
+.modal p{{font-size:12px;color:var(--text2);margin-bottom:14px}}
+.token-box{{display:block;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--token);word-break:break-all;margin-bottom:10px;font-family:monospace;user-select:all}}
 .cert-notice{{background:#052e16;border:1px solid #166534;border-radius:8px;padding:12px 14px;font-size:12px;color:#86efac;margin-bottom:14px}}
 .cert-notice strong{{color:#4ade80}}
 .modal-actions{{display:flex;gap:10px;flex-wrap:wrap}}
 .toast{{position:fixed;bottom:24px;right:24px;background:#052e16;color:#86efac;border:1px solid #166534;border-radius:8px;padding:12px 20px;font-size:13px;display:none;z-index:999}}
-.empty-row td{{text-align:center;color:#4b5270;padding:28px}}
+.empty-row td{{text-align:center;color:var(--text3);padding:28px}}
+.theme-bar{{display:flex;gap:6px;align-items:center}}
+.theme-dot{{width:18px;height:18px;border-radius:50%;border:2px solid transparent;cursor:pointer;transition:transform .12s}}
+.theme-dot:hover{{transform:scale(1.2)}}
+.theme-dot.active{{border-color:var(--acc)}}
 </style>
 </head>
 <body>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
   <h1>🐾 Agent Manager</h1>
-  <a href="#" onclick="window.location='audit?admin='+encodeURIComponent(localStorage.getItem('adminToken')||'');return false;" style="font-size:12px;color:#8b93a7;text-decoration:none;background:#1e2235;border:1px solid #2d3354;border-radius:6px;padding:6px 14px">📋 Audit log</a>
+  <div style="display:flex;gap:10px;align-items:center">
+    <div class="theme-bar" title="Tema">
+      <span class="theme-dot" data-theme="" style="background:#3b5bdb" onclick="setTheme('')" title="Dark (podrazumevano)"></span>
+      <span class="theme-dot" data-theme="theme-midnight" style="background:#6366f1" onclick="setTheme('theme-midnight')" title="Midnight"></span>
+      <span class="theme-dot" data-theme="theme-ocean" style="background:#0ea5e9" onclick="setTheme('theme-ocean')" title="Ocean"></span>
+      <span class="theme-dot" data-theme="theme-light" style="background:#e2e8f0;border-color:#94a3b8" onclick="setTheme('theme-light')" title="Light"></span>
+    </div>
+    <a href="#" onclick="window.location='audit?admin='+encodeURIComponent(localStorage.getItem('adminToken')||'');return false;" class="btn-ghost" style="font-size:12px;padding:6px 14px">📋 Audit log</a>
+    <button class="btn-ghost" style="font-size:12px;padding:6px 14px;color:#f87171;border-color:#7f1d1d" onclick="doLogout()">⏻ Odjava</button>
+  </div>
 </div>
 <p class="subtitle">Upravljanje outbound agentima i ACL pravilima</p>
 
@@ -577,6 +612,26 @@ document.querySelectorAll('.token-cell').forEach(el => {{
 }});
 
 if (!localStorage.getItem('adminToken')) showLogin();
+
+function doLogout() {{
+  localStorage.removeItem('adminToken');
+  document.getElementById('loginInput').value = '';
+  document.getElementById('loginErr').style.display = 'none';
+  showLogin();
+}}
+
+var _themes = ['','theme-midnight','theme-ocean','theme-light'];
+function setTheme(t) {{
+  document.body.className = t;
+  localStorage.setItem('ferretTheme', t);
+  document.querySelectorAll('.theme-dot').forEach(d => {{
+    d.classList.toggle('active', d.dataset.theme === t);
+  }});
+}}
+(function() {{
+  var saved = localStorage.getItem('ferretTheme') || '';
+  setTheme(saved);
+}})();
 </script>
 </body>
 </html>"""
