@@ -850,7 +850,8 @@ def _render_audit(events, agents, filter_token, filter_event, admin_token="") ->
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Audit Log</title>
+<title>🐾 Audit Log</title>
+<link rel="icon" href="https://www.servisport.rs/favicon.ico">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e2e4ed;padding:32px}}
@@ -881,7 +882,7 @@ tr:hover td{{background:#1a1d27}}
 </style>
 </head>
 <body>
-<h1>Audit Log</h1>
+<h1>🐾 Audit Log</h1>
 <p class="subtitle">{len(events)} događaja | <a href="ui" class="btn-ghost" style="font-size:12px;padding:4px 10px">← Agenti</a></p>
 
 <div class="toolbar">
@@ -928,7 +929,8 @@ def _render_login(redirect: str) -> str:
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Ferret — Login</title>
+<title>🐾 Ferret</title>
+<link rel="icon" href="https://www.servisport.rs/favicon.ico">
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{background:#0a0c14;color:#e2e8f0;font-family:system-ui,sans-serif;

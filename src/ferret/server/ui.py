@@ -81,7 +81,8 @@ def render_ui(agents: list[dict]) -> str:
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Agent Manager</title>
+<title>🐾 Agent Manager</title>
+<link rel="icon" href="https://www.servisport.rs/favicon.ico">
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:'Segoe UI',system-ui,sans-serif;background:#0f1117;color:#e2e4ed;padding:32px}}
@@ -144,7 +145,7 @@ code.token-cell:hover{{border-color:#3b5bdb}}
 </head>
 <body>
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-  <h1>Agent Manager</h1>
+  <h1>🐾 Agent Manager</h1>
   <a href="#" onclick="window.location='audit?admin='+encodeURIComponent(localStorage.getItem('adminToken')||'');return false;" style="font-size:12px;color:#8b93a7;text-decoration:none;background:#1e2235;border:1px solid #2d3354;border-radius:6px;padding:6px 14px">📋 Audit log</a>
 </div>
 <p class="subtitle">Upravljanje outbound agentima i ACL pravilima</p>
