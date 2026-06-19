@@ -1,3 +1,7 @@
+<img width="1867" height="994" alt="Screenshot from 2026-06-18 02-27-43" src="https://github.com/user-attachments/assets/c377eca6-a3e0-4633-bd70-6dbc67cf8c4f" />
+
+
+
 # 🐾 Ferret
 
 > ⚠️ **v0.1 Alpha** — works in production for us, but APIs and config format may change before v1.0. See [Roadmap](#roadmap).
